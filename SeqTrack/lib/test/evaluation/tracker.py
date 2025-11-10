@@ -6,7 +6,14 @@ import time
 import cv2 as cv
 import sys
 
-from lib.utils.lmdb_utils import decode_img
+# Optional LMDB support: provide safe fallback when lmdb is not installed
+try:
+    from lib.utils.lmdb_utils import decode_img as _lmdb_decode_img  # type: ignore
+    _HAS_LMDB = True
+except Exception:
+    _HAS_LMDB = False
+    def _lmdb_decode_img(*args, **kwargs):
+        raise ImportError("lmdb is not installed. Install `lmdb` or avoid LMDB-backed datasets for testing.")
 from pathlib import Path
 import numpy as np
 
@@ -282,7 +289,9 @@ class Tracker:
             im = cv.imread(image_file)
             return cv.cvtColor(im, cv.COLOR_BGR2RGB)
         elif isinstance(image_file, list) and len(image_file) == 2:
-            return decode_img(image_file[0], image_file[1])
+            if not _HAS_LMDB:
+                raise ImportError("LMDB image requested but `lmdb` is not installed. Install `lmdb` or disable LMDB usage.")
+            return _lmdb_decode_img(image_file[0], image_file[1])
         else:
             raise ValueError("type of image_file should be str or list")
 
