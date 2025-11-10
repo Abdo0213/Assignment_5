@@ -216,14 +216,16 @@ class LTRTrainer(BaseTrainer):
         repo_id = None
         filename = None
         
-        # Format 1: "hf://repo_id/phase_name/checkpoint_name.pth.tar"
+        # Format 1: "hf://user/repo/<path-inside-repo>"
         if checkpoint_input.startswith("hf://"):
-            parts = checkpoint_input[5:].split("/", 2)  # Remove "hf://" and split
+            raw = checkpoint_input[5:]  # strip "hf://"
+            parts = raw.split("/")
             if len(parts) >= 3:
-                repo_id = parts[0]
-                phase_name = parts[1]
-                filename = parts[2]
-                hf_path = f"{phase_name}/{filename}"
+                # repo_id is always first two segments: user/repo
+                repo_id = f"{parts[0]}/{parts[1]}"
+                # the rest is the file path inside the repo
+                filename = "/".join(parts[2:])
+                hf_path = filename
         
         # Format 2: "repo_id/phase_name/checkpoint_name.pth.tar" (no hf:// prefix)
         elif "/" in checkpoint_input and not os.path.isabs(checkpoint_input):

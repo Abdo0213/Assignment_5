@@ -11,7 +11,7 @@ def parse_args():
     parser.add_argument('--script', type=str, help='training script name')
     parser.add_argument('--config', type=str, default='baseline', help='yaml configure file name')
     parser.add_argument('--save_dir', type=str, help='root directory to save checkpoints, logs, and tensorboard')
-    parser.add_argument('--mode', type=str, choices=["single", "multiple"], default="multiple",
+    parser.add_argument('--mode', type=str, choices=["single", "multiple"], default="single",
                         help="train on single gpu or multiple gpus")
     parser.add_argument('--nproc_per_node', type=int, help="number of GPUs per node")  # specify when mode is multiple
     parser.add_argument('--use_lmdb', type=int, choices=[0, 1], default=0)  # whether datasets are in lmdb format
@@ -48,17 +48,33 @@ def main():
         )
         # ---- END: UPDATED COMMAND ----
     elif args.mode == "multiple":
-        train_cmd = (
-            f"python -m torch.distributed.launch --nproc_per_node {args.nproc_per_node} lib/train/run_training.py "
-            f"--script {args.script} "
-            f"--config {args.config} "
-            f"--save_dir {args.save_dir} "
-            f"--use_lmdb {args.use_lmdb} "
-            f"--phase {args.phase} "
-            f"--hf_train_prefix \"{args.hf_train_prefix}\" "
-            f"{'--repo_id ' + args.repo_id if args.repo_id else ''} "
-            f"{'--resume ' + args.resume if args.resume else ''}"
-        )
+        if not args.nproc_per_node or str(args.nproc_per_node).lower() == "none":
+            # Fallback to single process if nproc_per_node is not provided
+            print("nproc_per_node not provided for multiple mode. Falling back to single process.")
+            train_cmd = (
+                f"python lib/train/run_training.py "
+                f"--script {args.script} "
+                f"--config {args.config} "
+                f"--save_dir {args.save_dir} "
+                f"--use_lmdb {args.use_lmdb} "
+                f"--seed {args.seed} "
+                f"--phase {args.phase} "
+                f"--hf_train_prefix \"{args.hf_train_prefix}\" "
+                f"{'--repo_id ' + args.repo_id if args.repo_id else ''} "
+                f"{'--resume ' + args.resume if args.resume else ''}"
+            )
+        else:
+            train_cmd = (
+                f"python -m torch.distributed.launch --nproc_per_node {args.nproc_per_node} lib/train/run_training.py "
+                f"--script {args.script} "
+                f"--config {args.config} "
+                f"--save_dir {args.save_dir} "
+                f"--use_lmdb {args.use_lmdb} "
+                f"--phase {args.phase} "
+                f"--hf_train_prefix \"{args.hf_train_prefix}\" "
+                f"{'--repo_id ' + args.repo_id if args.repo_id else ''} "
+                f"{'--resume ' + args.resume if args.resume else ''}"
+            )
     else:
         raise ValueError("mode should be 'single' or 'multiple'.")
 
