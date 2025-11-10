@@ -58,6 +58,32 @@ class Assignment4Evaluator:
         # Storage for results
         self.evaluation_results = {}  # epoch -> metrics dict
         self.inference_rates = {}     # epoch -> FPS/ms_per_frame
+
+        # Load previous summary if resuming
+        self.summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
+        if os.path.exists(self.summary_path):
+            try:
+                with open(self.summary_path, 'r') as f:
+                    summary = json.load(f)
+                prev_eval = summary.get('evaluation_results', {})
+                prev_inf = summary.get('inference_rates', {})
+                # keys in summary may be strings, convert to int
+                for k, v in prev_eval.items():
+                    try:
+                        epoch = int(k)
+                    except Exception:
+                        continue
+                    self.evaluation_results[epoch] = v
+                for k, v in prev_inf.items():
+                    try:
+                        epoch = int(k)
+                    except Exception:
+                        continue
+                    self.inference_rates[epoch] = v
+                if self.evaluation_results:
+                    print(f"🔄 Loaded {len(self.evaluation_results)} previous evaluation entries from summary.")
+            except Exception as e:
+                print(f"⚠️ Failed to load previous summary: {e}")
         
     def list_checkpoints(self):
         """List available checkpoints in Hugging Face repo for this phase"""
@@ -359,12 +385,12 @@ class Assignment4Evaluator:
                     try:
                         upload_file(
                             path_or_fileobj=p,
-                            path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}",
+                            path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
                             repo_id=self.repo_id,
                             repo_type="model",
                             token=token,
                         )
-                        print(f"⬆️ Uploaded table to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}")
+                        print(f"⬆️ Uploaded table to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
                     except Exception as e:
                         print("⚠️ Failed uploading table:", e)
         except Exception as e:
@@ -446,12 +472,12 @@ class Assignment4Evaluator:
                     try:
                         upload_file(
                             path_or_fileobj=p,
-                            path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}",
+                            path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
                             repo_id=self.repo_id,
                             repo_type="model",
                             token=token,
                         )
-                        print(f"⬆️ Uploaded graph to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}")
+                        print(f"⬆️ Uploaded graph to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
                     except Exception as e:
                         print("⚠️ Failed uploading graph:", e)
         except Exception as e:
@@ -516,12 +542,12 @@ class Assignment4Evaluator:
             if token:
                 upload_file(
                     path_or_fileobj=summary_path,
-                    path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(summary_path)}",
+                    path_in_repo=f"{self.upload_prefix}/{os.path.basename(summary_path)}",
                     repo_id=self.repo_id,
                     repo_type="model",
                     token=token,
                 )
-                print(f"⬆️ Uploaded summary to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(summary_path)}")
+                print(f"⬆️ Uploaded summary to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(summary_path)}")
         except Exception as e:
             print("⚠️ Failed uploading summary JSON:", e)
         
