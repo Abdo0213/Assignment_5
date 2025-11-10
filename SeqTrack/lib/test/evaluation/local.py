@@ -26,6 +26,8 @@ def local_env_settings():
     s.result_plot_path = result_plot_path
     # Some evaluation utilities expect prj_dir attribute
     s.prj_dir = workspace_dir
+    # Some utilities expect save_dir (mirror workspace_dir)
+    s.save_dir = workspace_dir
 
     # Mirror training dataset paths (adjust to Kaggle /kaggle/working or /kaggle/temp)
     s.lasot_path = getattr(train_env, 'lasot_dir', '/kaggle/temp/LaSOT_partial')

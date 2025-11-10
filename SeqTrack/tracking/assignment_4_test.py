@@ -245,30 +245,45 @@ class Assignment4Evaluator:
                 # Compute results directly (skip_missing_seq=True to tolerate partial datasets)
                 eval_data = extract_results(trackers, dataset, self.dataset_name, skip_missing_seq=True)
                 
-                # Extract metrics
+                # Extract metrics (robust to empty/partial results)
+                avg_iou = 0.0
+                auc = 0.0
+                precision = 0.0
+
                 if eval_data and 'avg_overlap_all' in eval_data:
-                    avg_iou = eval_data['avg_overlap_all'][0] if len(eval_data['avg_overlap_all']) > 0 else 0
-                else:
-                    avg_iou = 0
+                    avg_list = eval_data['avg_overlap_all']
+                    if isinstance(avg_list, list) and len(avg_list) > 0:
+                        # avg_list is [num_seq][num_trackers]; take mean over sequences and trackers
+                        try:
+                            arr = np.array(avg_list, dtype=float)
+                            if arr.size > 0:
+                                avg_iou = float(np.nanmean(arr))
+                        except Exception:
+                            pass
                 
                 # Extract success rate (AUC) and precision
                 if eval_data and 'ave_success_rate_plot_overlap' in eval_data:
                     success_plot = eval_data['ave_success_rate_plot_overlap']
-                    if len(success_plot) > 0 and len(success_plot[0]) > 0:
-                        auc = np.mean(success_plot[0][0]) if isinstance(success_plot[0][0], (list, np.ndarray)) else success_plot[0][0]
-                    else:
-                        auc = 0
-                else:
-                    auc = 0
+                    try:
+                        arr = np.array(success_plot, dtype=float)
+                        if arr.size > 0:
+                            # arr shape: [num_seq, num_trackers, bins]; take mean over seq+trackers, then mean over bins
+                            auc = float(np.nanmean(arr))
+                    except Exception:
+                        pass
                 
                 if eval_data and 'ave_success_rate_plot_center' in eval_data:
                     prec_plot = eval_data['ave_success_rate_plot_center']
-                    if len(prec_plot) > 0 and len(prec_plot[0]) > 0:
-                        precision = prec_plot[0][0][20] if isinstance(prec_plot[0][0], (list, np.ndarray)) and len(prec_plot[0][0]) > 20 else 0
-                    else:
-                        precision = 0
-                else:
-                    precision = 0
+                    try:
+                        arr = np.array(prec_plot, dtype=float)
+                        if arr.size > 0:
+                            # pick bin 20 if exists; else mean
+                            if arr.shape[-1] > 20:
+                                precision = float(np.nanmean(arr[..., 20]))
+                            else:
+                                precision = float(np.nanmean(arr))
+                    except Exception:
+                        pass
                 
                 metrics = {
                     'epoch': epoch,
