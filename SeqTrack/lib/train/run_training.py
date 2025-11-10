@@ -82,6 +82,8 @@ def main():
     parser.add_argument('--phase', type=str, default="phase_1")
     parser.add_argument('--repo_id', type=str, default=None,
                         help='Hugging Face repo ID, e.g. "ayamohamed2500/seqtrack-checkpoint"')  # ✅ added
+    parser.add_argument('--hf_train_prefix', type=str, default="member_10_abdelrahman_ahmed/training",
+                        help='Subfolder path inside repo to store training artifacts')
     # ---- END: ADDED FOR AUTOMATION ----
 
     args = parser.parse_args()
@@ -101,6 +103,10 @@ def main():
     else:
         print("Training on CPU.")
     print(f"SEED: {args.seed} (our TEAM Number)")
+
+    # Expose prefix via env-like settings object through run_training call
+    # We pass via settings in run_training by temporarily stashing in os.environ if needed
+    os.environ["HF_TRAIN_PREFIX"] = args.hf_train_prefix or "member_10_abdelrahman_ahmed/training"
 
     run_training(args.script, args.config, cudnn_benchmark=args.cudnn_benchmark,
                  local_rank=args.local_rank, save_dir=args.save_dir, base_seed=args.seed,

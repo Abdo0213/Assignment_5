@@ -21,6 +21,8 @@ def parse_args():
     parser.add_argument('--resume', type=str, default=None, help='path to checkpoint to resume training from')
     parser.add_argument('--phase', type=str, default="phase_1", help='phase name for Hugging Face upload')
     parser.add_argument('--repo_id', type=str, default=None, help='Hugging Face repo ID for uploading checkpoints')
+    parser.add_argument('--hf_train_prefix', type=str, default="member_10_abdelrahman_ahmed/training",
+                        help='Subfolder path inside repo to store training artifacts (checkpoints, plots)')
     # ---- END: ADDED FOR AUTOMATION ----
 
     args = parser.parse_args()
@@ -40,6 +42,7 @@ def main():
             f"--use_lmdb {args.use_lmdb} "
             f"--seed {args.seed} "
             f"--phase {args.phase} "
+            f"--hf_train_prefix \"{args.hf_train_prefix}\" "
             f"{'--repo_id ' + args.repo_id if args.repo_id else ''} "
             f"{'--resume ' + args.resume if args.resume else ''}"
         )
@@ -52,6 +55,7 @@ def main():
             f"--save_dir {args.save_dir} "
             f"--use_lmdb {args.use_lmdb} "
             f"--phase {args.phase} "
+            f"--hf_train_prefix \"{args.hf_train_prefix}\" "
             f"{'--repo_id ' + args.repo_id if args.repo_id else ''} "
             f"{'--resume ' + args.resume if args.resume else ''}"
         )

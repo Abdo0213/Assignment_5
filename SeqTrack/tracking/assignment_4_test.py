@@ -30,7 +30,7 @@ env_path = os.path.join(os.path.dirname(__file__), '..')
 if env_path not in sys.path:
     sys.path.append(env_path)
 
-from huggingface_hub import hf_hub_download, HfFolder, list_repo_files
+from huggingface_hub import hf_hub_download, HfFolder, list_repo_files, upload_file
 from lib.test.evaluation import get_dataset, trackerlist
 from lib.test.evaluation.running import run_dataset
 from lib.test.analysis.plot_results import print_results
@@ -41,13 +41,14 @@ class Assignment4Evaluator:
     """Evaluator for Assignment 4 - Test and Evaluation"""
     
     def __init__(self, repo_id, phase_name, start_epoch=1, end_epoch=10, 
-                 dataset_name='lasot', temp_dir=None):
+                 dataset_name='lasot', temp_dir=None, upload_prefix="member_10_abdelrahman_ahmed/test"):
         self.repo_id = repo_id
         self.phase_name = phase_name
         self.start_epoch = start_epoch
         self.end_epoch = end_epoch
         self.dataset_name = dataset_name
         self.temp_dir = temp_dir or tempfile.gettempdir()
+        self.upload_prefix = upload_prefix
         self.results_dir = os.path.join(self.temp_dir, f"assignment_4_results_{phase_name}")
         os.makedirs(self.results_dir, exist_ok=True)
         
@@ -324,6 +325,25 @@ class Assignment4Evaluator:
         print(f"\n📊 Table 2 (Evaluation Results) saved to: {table2_path}")
         print(df_table2.to_string(index=False))
         
+        # Optional: upload tables to the same repo/phase path
+        try:
+            token = HfFolder.get_token()
+            if token:
+                for p in [table1_path, table2_path]:
+                    try:
+                        upload_file(
+                            path_or_fileobj=p,
+                            path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}",
+                            repo_id=self.repo_id,
+                            repo_type="model",
+                            token=token,
+                        )
+                        print(f"⬆️ Uploaded table to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}")
+                    except Exception as e:
+                        print("⚠️ Failed uploading table:", e)
+        except Exception as e:
+            print("⚠️ Upload block (tables) error:", e)
+
         return table1_path, table2_path
     
     def generate_graphs(self):
@@ -391,7 +411,26 @@ class Assignment4Evaluator:
         plt.savefig(combined_graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Combined graph saved to: {combined_graph_path}")
-        
+
+        # Optional: upload graphs to the same repo/phase path
+        try:
+            token = HfFolder.get_token()
+            if token:
+                for p in [graph_path, combined_graph_path]:
+                    try:
+                        upload_file(
+                            path_or_fileobj=p,
+                            path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}",
+                            repo_id=self.repo_id,
+                            repo_type="model",
+                            token=token,
+                        )
+                        print(f"⬆️ Uploaded graph to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(p)}")
+                    except Exception as e:
+                        print("⚠️ Failed uploading graph:", e)
+        except Exception as e:
+            print("⚠️ Upload block (graphs) error:", e)
+
         return graph_path, combined_graph_path
     
     def run_full_evaluation(self):
@@ -444,6 +483,21 @@ class Assignment4Evaluator:
         with open(summary_path, 'w') as f:
             json.dump(summary, f, indent=2)
         print(f"\n💾 Summary saved to: {summary_path}")
+
+        # Optional: upload summary JSON
+        try:
+            token = HfFolder.get_token()
+            if token:
+                upload_file(
+                    path_or_fileobj=summary_path,
+                    path_in_repo=f"{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(summary_path)}",
+                    repo_id=self.repo_id,
+                    repo_type="model",
+                    token=token,
+                )
+                print(f"⬆️ Uploaded summary to Hugging Face: {self.repo_id}/{self.upload_prefix}/{self.phase_name}/results/{os.path.basename(summary_path)}")
+        except Exception as e:
+            print("⚠️ Failed uploading summary JSON:", e)
         
         print(f"\n✅ Assignment 4 evaluation complete for {self.phase_name}!")
         print(f"📁 Results directory: {self.results_dir}")
@@ -463,6 +517,8 @@ def main():
                         help='Dataset name (default: lasot)')
     parser.add_argument('--temp_dir', type=str, default=None,
                         help='Temporary directory for downloads (default: system temp)')
+    parser.add_argument('--upload_prefix', type=str, default="member_10_abdelrahman_ahmed/test",
+                        help='Subfolder path inside repo to store test artifacts (tables, graphs)')
     
     args = parser.parse_args()
     
@@ -472,7 +528,8 @@ def main():
         start_epoch=args.start_epoch,
         end_epoch=args.end_epoch,
         dataset_name=args.dataset_name,
-        temp_dir=args.temp_dir
+        temp_dir=args.temp_dir,
+        upload_prefix=args.upload_prefix
     )
     
     evaluator.run_full_evaluation()

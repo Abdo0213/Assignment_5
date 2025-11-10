@@ -67,6 +67,14 @@ def run(settings):
             settings.device = torch.device("cuda:0")
     else:
         settings.device = torch.device("cpu")
+
+    # propagate optional upload prefix from environment
+    try:
+        if not hasattr(settings, "hf_train_prefix") or settings.hf_train_prefix is None:
+            import os as _os
+            settings.hf_train_prefix = _os.environ.get("HF_TRAIN_PREFIX", "member_10_abdelrahman_ahmed/training")
+    except Exception:
+        pass
     settings.deep_sup = getattr(cfg.TRAIN, "DEEP_SUPERVISION", False)
     settings.distill = getattr(cfg.TRAIN, "DISTILL", False)
     settings.distill_loss_type = getattr(cfg.TRAIN, "DISTILL_LOSS_TYPE", "KL")
