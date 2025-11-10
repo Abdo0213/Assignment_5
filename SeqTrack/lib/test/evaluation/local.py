@@ -8,6 +8,8 @@ def local_env_settings():
 
     # Base workspace
     workspace_dir = getattr(train_env, 'workspace_dir', '/kaggle/working') or os.getcwd()
+    # Resolve repo root from this file's location to find configs (experiments/...)
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
 
     # Set evaluation outputs inside Kaggle /working folder
     results_path = os.path.join(workspace_dir, 'test', 'tracking_results')
@@ -24,8 +26,8 @@ def local_env_settings():
     s.segmentation_path = segmentation_path
     s.network_path = network_path
     s.result_plot_path = result_plot_path
-    # Some evaluation utilities expect prj_dir attribute
-    s.prj_dir = workspace_dir
+    # Some evaluation utilities expect prj_dir attribute (should point to repo root containing experiments/)
+    s.prj_dir = repo_root
     # Some utilities expect save_dir (mirror workspace_dir)
     s.save_dir = workspace_dir
 
