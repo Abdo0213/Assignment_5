@@ -17,9 +17,9 @@ def parameters(yaml_name: str):
     params.yaml_name = yaml_name
     # template and search region
     params.template_factor = cfg.TEST.TEMPLATE_FACTOR
-    params.template_size = cfg.TEST.TEMPLATE_SIZE
+    params.template_size = getattr(cfg.DATA.TEMPLATE, "SIZE", cfg.TEST.TEMPLATE_SIZE)
     params.search_factor = cfg.TEST.SEARCH_FACTOR
-    params.search_size = cfg.TEST.SEARCH_SIZE
+    params.search_size = getattr(cfg.DATA.SEARCH, "SIZE", cfg.TEST.SEARCH_SIZE)
 
     # Network checkpoint path
     params.checkpoint = os.path.join(save_dir, "checkpoints/train/seqtrack/%s/SEQTRACK_ep%04d.pth.tar" %
