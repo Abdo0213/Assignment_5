@@ -58,12 +58,15 @@ def run(settings):
         raise ValueError("illegal script name")
 
     # wrap networks to distributed one
-    net.cuda()
-    if settings.local_rank != -1:
-        net = DDP(net, broadcast_buffers=False, device_ids=[settings.local_rank], find_unused_parameters=True)
-        settings.device = torch.device("cuda:%d" % settings.local_rank)
+    if torch.cuda.is_available():
+        net.cuda()
+        if settings.local_rank != -1:
+            net = DDP(net, broadcast_buffers=False, device_ids=[settings.local_rank], find_unused_parameters=True)
+            settings.device = torch.device("cuda:%d" % settings.local_rank)
+        else:
+            settings.device = torch.device("cuda:0")
     else:
-        settings.device = torch.device("cuda:0")
+        settings.device = torch.device("cpu")
     settings.deep_sup = getattr(cfg.TRAIN, "DEEP_SUPERVISION", False)
     settings.distill = getattr(cfg.TRAIN, "DISTILL", False)
     settings.distill_loss_type = getattr(cfg.TRAIN, "DISTILL_LOSS_TYPE", "KL")
