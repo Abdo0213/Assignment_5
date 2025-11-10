@@ -13,18 +13,24 @@ class SEQTRACK(BaseTracker):
     def __init__(self, params, dataset_name):
         super(SEQTRACK, self).__init__(params)
         network = build_seqtrack(params.cfg)
-        network.load_state_dict(torch.load(self.params.checkpoint, map_location='cpu')['net'], strict=True)
+        ckpt = torch.load(self.params.checkpoint, map_location='cpu', weights_only=False)
+        net_state = ckpt['net'] if 'net' in ckpt else ckpt.get('state_dict', ckpt)
+        network.load_state_dict(net_state, strict=True)
         self.cfg = params.cfg
         self.seq_format = self.cfg.DATA.SEQ_FORMAT
         self.num_template = self.cfg.TEST.NUM_TEMPLATES
         self.bins = self.cfg.MODEL.BINS
         if self.cfg.TEST.WINDOW == True: # for window penalty
-            self.hanning = torch.tensor(np.hanning(self.bins)).unsqueeze(0).cuda()
-            self.hanning = self.hanning
+            self.hanning = torch.tensor(np.hanning(self.bins)).unsqueeze(0)
+            if torch.cuda.is_available():
+                self.hanning = self.hanning.cuda()
         else:
             self.hanning = None
         self.start = self.bins + 1 # start token
-        self.network = network.cuda()
+        if torch.cuda.is_available():
+            self.network = network.cuda()
+        else:
+            self.network = network
         self.network.eval()
         self.preprocessor = Preprocessor()
         self.state = None
