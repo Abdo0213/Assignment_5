@@ -217,6 +217,8 @@ class LTRTrainer(BaseTrainer):
         filename = None
         
         # Format 1: "hf://user/repo/<path-inside-repo>"
+        hf_prefix = getattr(self.settings, 'hf_train_prefix', 'member_10_abdelrahman_ahmed/training')
+
         if checkpoint_input.startswith("hf://"):
             raw = checkpoint_input[5:]  # strip "hf://"
             parts = raw.split("/")
@@ -239,37 +241,31 @@ class LTRTrainer(BaseTrainer):
                 # If we have repo_id set, check if first parts match
                 if self.repo_id:
                     repo_parts = self.repo_id.split("/")
-                    if len(parts) >= len(repo_parts) + 2:
+                    if len(parts) >= len(repo_parts) + 1:
                         # Check if first parts match repo_id
                         if "/".join(parts[:len(repo_parts)]) == self.repo_id:
                             repo_id = self.repo_id
-                            phase_name = parts[len(repo_parts)]
-                            filename = "/".join(parts[len(repo_parts)+1:])
-                            hf_path = f"{phase_name}/{filename}"
+                            filename = "/".join(parts[len(repo_parts):])
+                            hf_path = filename
                 else:
                     # Try to detect: assume repo_id is first part(s) if it contains "/"
                     # For now, try 2-part repo_id (user/repo)
-                    if len(parts) >= 4:
+                    if len(parts) >= 3:
                         potential_repo = f"{parts[0]}/{parts[1]}"
-                        phase_name = parts[2]
-                        filename = "/".join(parts[3:])
+                        filename = "/".join(parts[2:])
                         repo_id = potential_repo
-                        hf_path = f"{phase_name}/{filename}"
+                        hf_path = filename
         
-        # Format 3: Just filename or phase_name/filename - use repo_id and phase_name from settings
-        if not hf_path and self.repo_id and self.phase_name:
+        # Format 3: Just filename - use repo_id and hf_train_prefix from settings
+        if not hf_path and self.repo_id:
             # Check if it's just a filename (no slashes)
             if "/" not in checkpoint_input:
                 repo_id = self.repo_id
                 filename = checkpoint_input
-                hf_path = f"{self.phase_name}/{filename}"
-            # Or if it's phase_name/filename
-            elif checkpoint_input.count("/") == 1:
-                parts = checkpoint_input.split("/", 1)
-                if parts[0] == self.phase_name:
-                    repo_id = self.repo_id
-                    filename = parts[1]
-                    hf_path = checkpoint_input
+                hf_path = f"{hf_prefix}/{filename}" if hf_prefix else filename
+            else:
+                repo_id = self.repo_id
+                hf_path = checkpoint_input
         
         # Download from Hugging Face if we identified an HF path
         if hf_path and repo_id:
@@ -606,17 +602,18 @@ class LTRTrainer(BaseTrainer):
                     if not token:
                         print("⚠️ Hugging Face token not found. Run `huggingface-cli login` first.")
                     else:
+                        hf_prefix = getattr(self.settings, 'hf_train_prefix', 'member_10_abdelrahman_ahmed/training').rstrip('/')
                         # Upload checkpoint only every 5 epochs
                         if ckpt_path and self.epoch % 5 == 0:
                             try:
                                 upload_file(
                                     path_or_fileobj=ckpt_path,
-                                    path_in_repo=f"{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}/{os.path.basename(ckpt_path)}",
+                                    path_in_repo=f"{hf_prefix}/{os.path.basename(ckpt_path)}",
                                     repo_id=self.repo_id,
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded checkpoint to Hugging Face: {self.repo_id}/{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}")
+                                print(f"Uploaded checkpoint to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(ckpt_path)}")
                                 # Clean up temp checkpoint file after upload
                                 try:
                                     if os.path.exists(ckpt_path):
@@ -631,12 +628,12 @@ class LTRTrainer(BaseTrainer):
                             try:
                                 upload_file(
                                     path_or_fileobj=iou_fig_path,
-                                    path_in_repo=f"{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}/{os.path.basename(iou_fig_path)}",
+                                    path_in_repo=f"{hf_prefix}/{os.path.basename(iou_fig_path)}",
                                     repo_id=self.repo_id,
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded IoU plot to Hugging Face: {self.repo_id}/{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}")
+                                print(f"Uploaded IoU plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(iou_fig_path)}")
                             except Exception as e:
                                 print("⚠️ Failed uploading IoU plot to Hugging Face:", e)
 
@@ -645,12 +642,12 @@ class LTRTrainer(BaseTrainer):
                             try:
                                 upload_file(
                                     path_or_fileobj=loss_fig_path,
-                                    path_in_repo=f"{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}/{os.path.basename(loss_fig_path)}",
+                                    path_in_repo=f"{hf_prefix}/{os.path.basename(loss_fig_path)}",
                                     repo_id=self.repo_id,
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded Loss plot to Hugging Face: {self.repo_id}/{getattr(self.settings,'hf_train_prefix','member_10_abdelrahman_ahmed/training')}/{self.phase_name}")
+                                print(f"Uploaded Loss plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(loss_fig_path)}")
                             except Exception as e:
                                 print("⚠️ Failed uploading Loss plot to Hugging Face:", e)
 

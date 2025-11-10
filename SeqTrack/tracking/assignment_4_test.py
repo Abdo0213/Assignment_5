@@ -58,6 +58,7 @@ class Assignment4Evaluator:
         # Storage for results
         self.evaluation_results = {}  # epoch -> metrics dict
         self.inference_rates = {}     # epoch -> FPS/ms_per_frame
+        self.per_sequence_metrics = {}  # sequence -> {epoch -> metrics}
 
         # Load previous summary if resuming
         self.summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
@@ -67,6 +68,7 @@ class Assignment4Evaluator:
                     summary = json.load(f)
                 prev_eval = summary.get('evaluation_results', {})
                 prev_inf = summary.get('inference_rates', {})
+                prev_seq = summary.get('per_sequence_metrics', {})
                 # keys in summary may be strings, convert to int
                 for k, v in prev_eval.items():
                     try:
@@ -80,8 +82,16 @@ class Assignment4Evaluator:
                     except Exception:
                         continue
                     self.inference_rates[epoch] = v
-                if self.evaluation_results:
-                    print(f"🔄 Loaded {len(self.evaluation_results)} previous evaluation entries from summary.")
+                for seq_name, epoch_dict in prev_seq.items():
+                    seq_store = self.per_sequence_metrics.setdefault(seq_name, {})
+                    for k, v in epoch_dict.items():
+                        try:
+                            epoch = int(k)
+                        except Exception:
+                            continue
+                        seq_store[epoch] = v
+                if self.evaluation_results or self.per_sequence_metrics:
+                    print(f"🔄 Loaded previous evaluation history from summary (epochs: {len(self.evaluation_results)}, sequences: {len(self.per_sequence_metrics)}).")
             except Exception as e:
                 print(f"⚠️ Failed to load previous summary: {e}")
         
@@ -310,6 +320,33 @@ class Assignment4Evaluator:
                                 precision = float(np.nanmean(arr))
                     except Exception:
                         pass
+
+                # Per-sequence metrics accumulation
+                if eval_data and 'avg_overlap_all' in eval_data:
+                    seq_names = eval_data.get('sequences', [])
+                    per_overlap = eval_data.get('avg_overlap_all', [])
+                    per_prec = eval_data.get('ave_success_rate_plot_center', [])
+                    per_auc = eval_data.get('ave_success_rate_plot_overlap', [])
+                    for seq_idx, seq_name in enumerate(seq_names):
+                        seq_metrics = self.per_sequence_metrics.setdefault(seq_name, {})
+                        entry = {}
+                        try:
+                            entry['iou'] = float(np.nanmean(np.array(per_overlap[seq_idx], dtype=float)))
+                        except Exception:
+                            entry['iou'] = 0.0
+                        try:
+                            arr_prec = np.array(per_prec[seq_idx], dtype=float)
+                            if arr_prec.size > 0:
+                                entry['precision'] = float(np.nanmean(arr_prec[..., 20])) if arr_prec.shape[-1] > 20 else float(np.nanmean(arr_prec))
+                            else:
+                                entry['precision'] = 0.0
+                        except Exception:
+                            entry['precision'] = 0.0
+                        try:
+                            entry['auc'] = float(np.nanmean(np.array(per_auc[seq_idx], dtype=float)))
+                        except Exception:
+                            entry['auc'] = 0.0
+                        seq_metrics[epoch] = entry
                 
                 metrics = {
                     'epoch': epoch,
@@ -376,12 +413,31 @@ class Assignment4Evaluator:
         df_table2.to_csv(table2_path, index=False)
         print(f"\n📊 Table 2 (Evaluation Results) saved to: {table2_path}")
         print(df_table2.to_string(index=False))
+
+        # Table 3: Per-sequence metrics across epochs
+        seq_rows = []
+        for seq_name, epoch_dict in self.per_sequence_metrics.items():
+            for epoch, metrics in epoch_dict.items():
+                seq_rows.append({
+                    'Sequence': seq_name,
+                    'Epoch': epoch,
+                    'IoU': f"{metrics.get('iou', 0.0):.4f}",
+                    'Precision': f"{metrics.get('precision', 0.0):.4f}",
+                    'AUC': f"{metrics.get('auc', 0.0):.4f}",
+                })
+        if seq_rows:
+            df_table3 = pd.DataFrame(seq_rows).sort_values(by=['Sequence', 'Epoch'])
+        else:
+            df_table3 = pd.DataFrame(columns=['Sequence', 'Epoch', 'IoU', 'Precision', 'AUC'])
+        table3_path = os.path.join(self.results_dir, f"{self.safe_phase}_table3_per_sequence.csv")
+        df_table3.to_csv(table3_path, index=False)
+        print(f"\n📊 Table 3 (Per-sequence Metrics) saved to: {table3_path}")
         
         # Optional: upload tables to the same repo/phase path
         try:
             token = HfFolder.get_token()
             if token:
-                for p in [table1_path, table2_path]:
+                for p in [table1_path, table2_path, table3_path]:
                     try:
                         upload_file(
                             path_or_fileobj=p,
@@ -529,7 +585,8 @@ class Assignment4Evaluator:
         summary = {
             'phase': self.phase_name,
             'evaluation_results': self.evaluation_results,
-            'inference_rates': self.inference_rates
+            'inference_rates': self.inference_rates,
+            'per_sequence_metrics': self.per_sequence_metrics
         }
         summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
         with open(summary_path, 'w') as f:
