@@ -260,7 +260,7 @@ class LTRTrainer(BaseTrainer):
             if "/" not in checkpoint_input:
                 repo_id = self.repo_id
                 filename = checkpoint_input
-                hf_path = f"{self.phase_name}/{filename}"
+                hf_path = f"member_10_abdelrahman_ahmed/training/{filename}" # f"{self.phase_name}/{filename}"
             # Or if it's phase_name/filename
             elif checkpoint_input.count("/") == 1:
                 parts = checkpoint_input.split("/", 1)
@@ -609,7 +609,7 @@ class LTRTrainer(BaseTrainer):
                             try:
                                 upload_file(
                                     path_or_fileobj=ckpt_path,
-                                    path_in_repo=f"{self.phase_name}/{os.path.basename(ckpt_path)}",
+                                    path_in_repo=f"member_10_abdelrahman_ahmed/training/{os.path.basename(ckpt_path)}", # f"{self.phase_name}/{os.path.basename(ckpt_path)}"
                                     repo_id=self.repo_id,
                                     repo_type="model",
                                     token=token,
