@@ -1,9 +1,9 @@
 import os
-from lib.test.evaluation.environment import EnvSettings
 from lib.train.admin.environment import env_settings as train_env_settings
 
 def local_env_settings():
     """Setup paths for Kaggle environment."""
+    from lib.test.evaluation.environment import EnvSettings  # local import to avoid circular dependency
     train_env = train_env_settings()
 
     # Base workspace
