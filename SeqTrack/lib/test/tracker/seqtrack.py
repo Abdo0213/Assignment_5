@@ -20,12 +20,8 @@ class SEQTRACK(BaseTracker):
         self.seq_format = self.cfg.DATA.SEQ_FORMAT
         self.num_template = self.cfg.TEST.NUM_TEMPLATES
         self.bins = self.cfg.MODEL.BINS
-        if self.cfg.TEST.WINDOW == True: # for window penalty
-            self.hanning = torch.tensor(np.hanning(self.bins)).unsqueeze(0)
-            if torch.cuda.is_available():
-                self.hanning = self.hanning.cuda()
-        else:
-            self.hanning = None
+        # Window penalty can cause size mismatch with certain partial configs; disable unless explicitly needed
+        self.hanning = None
         self.start = self.bins + 1 # start token
         if torch.cuda.is_available():
             self.network = network.cuda()
