@@ -242,7 +242,8 @@ class Assignment4Evaluator:
                 dataset = get_dataset(self.dataset_name)
                 
                 # Extract results
-                eval_data = extract_results(trackers, dataset, self.dataset_name, force_evaluation=True)
+                # Compute results directly (skip_missing_seq=True to tolerate partial datasets)
+                eval_data = extract_results(trackers, dataset, self.dataset_name, skip_missing_seq=True)
                 
                 # Extract metrics
                 if eval_data and 'avg_overlap_all' in eval_data:
