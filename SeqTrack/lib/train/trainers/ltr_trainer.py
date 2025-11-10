@@ -93,7 +93,7 @@ class LTRTrainer(BaseTrainer):
                 if checkpoint_path and os.path.exists(checkpoint_path):
                     print(f"🔁 Resuming from checkpoint: {checkpoint_path}")
                     try:
-                        ckpt = torch.load(checkpoint_path, map_location='cpu')
+                        ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
                         net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
                         
                         # Load network weights with better error handling
