@@ -1,6 +1,7 @@
 import os
 import time
 import traceback
+import tempfile
 from collections import OrderedDict
 
 import torch
@@ -12,7 +13,7 @@ from lib.train.admin import AverageMeter, StatValue, TensorboardWriter
 import lib.utils.misc as misc
 
 # Optional HF upload + plotting
-from huggingface_hub import upload_file, HfFolder, upload_folder
+from huggingface_hub import upload_file, HfFolder, upload_folder, hf_hub_download
 import matplotlib.pyplot as plt
 
 
@@ -75,13 +76,24 @@ class LTRTrainer(BaseTrainer):
             # Use the specific log filename requested
             self.settings.log_file = os.path.join(self.phase_dir, "seqtrack-seqtrack_b256.log")
 
+        # Initialize epoch tracking
+        if not hasattr(self, 'epoch') or self.epoch is None:
+            self.epoch = 0
+        
         # If resume_checkpoint provided, attempt to load weights, optimizer, epoch, and iou_values
         if self.resume_checkpoint:
             try:
-                if os.path.exists(self.resume_checkpoint):
-                    print(f"🔁 Resuming from checkpoint: {self.resume_checkpoint}")
+                # Check if resume_checkpoint is a Hugging Face path or needs downloading
+                checkpoint_path = self._resolve_checkpoint_path(self.resume_checkpoint)
+                
+                # If resolution failed but original path exists, use it
+                if checkpoint_path is None and os.path.exists(self.resume_checkpoint):
+                    checkpoint_path = self.resume_checkpoint
+                
+                if checkpoint_path and os.path.exists(checkpoint_path):
+                    print(f"🔁 Resuming from checkpoint: {checkpoint_path}")
                     try:
-                        ckpt = torch.load(self.resume_checkpoint, map_location='cpu')
+                        ckpt = torch.load(checkpoint_path, map_location='cpu')
                         net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
                         
                         # Load network weights with better error handling
@@ -165,14 +177,128 @@ class LTRTrainer(BaseTrainer):
                         print("✅ Resume checkpoint loaded successfully")
                     except Exception as e:
                         try:
-                            self.load_state_dict(self.resume_checkpoint)
+                            # Try fallback with resolved path
+                            if checkpoint_path:
+                                self.load_state_dict(checkpoint_path)
+                            else:
+                                self.load_state_dict(self.resume_checkpoint)
                             print("✅ Fallback: loaded using base trainer method")
                         except Exception as inner_e:
                             print("⚠️ Error while loading resume checkpoint:", e, inner_e)
                 else:
-                    print(f"⚠️ Resume checkpoint path does not exist: {self.resume_checkpoint}")
+                    print(f"⚠️ Resume checkpoint path does not exist: {checkpoint_path if checkpoint_path else self.resume_checkpoint}")
+                    print(f"   Original input: {self.resume_checkpoint}")
             except Exception as e:
                 print("⚠️ Error while loading resume checkpoint:", e)
+                import traceback
+                traceback.print_exc()
+        else:
+            # No resume checkpoint - starting training from scratch
+            print(f"[{self.phase_name}] 🚀 Starting training from scratch (epoch 1)")
+            print(f"[{self.phase_name}]    IoU and Loss history will be collected during training")
+    
+    def _resolve_checkpoint_path(self, checkpoint_input):
+        """
+        Resolve checkpoint path from various input formats:
+        - Local file path: "/path/to/checkpoint.pth.tar"
+        - Hugging Face format: "hf://repo_id/phase_name/checkpoint_name.pth.tar"
+        - Hugging Face format: "repo_id/phase_name/checkpoint_name.pth.tar"
+        - Just checkpoint name (assumes Hugging Face if repo_id is set)
+        
+        Returns: Local file path to checkpoint (downloaded if from HF)
+        """
+        # If it's already a local file that exists, return it
+        if os.path.exists(checkpoint_input):
+            return checkpoint_input
+        
+        # Check if it's a Hugging Face path
+        hf_path = None
+        repo_id = None
+        filename = None
+        
+        # Format 1: "hf://repo_id/phase_name/checkpoint_name.pth.tar"
+        if checkpoint_input.startswith("hf://"):
+            parts = checkpoint_input[5:].split("/", 2)  # Remove "hf://" and split
+            if len(parts) >= 3:
+                repo_id = parts[0]
+                phase_name = parts[1]
+                filename = parts[2]
+                hf_path = f"{phase_name}/{filename}"
+        
+        # Format 2: "repo_id/phase_name/checkpoint_name.pth.tar" (no hf:// prefix)
+        elif "/" in checkpoint_input and not os.path.isabs(checkpoint_input):
+            # Try to parse as repo_id/phase/filename
+            # repo_id can contain "/" (e.g., "user/repo-name")
+            # We need to find where phase_name starts
+            # Common pattern: user/repo-name/phase_name/filename.pth.tar
+            parts = checkpoint_input.split("/")
+            if len(parts) >= 3:
+                # Try different splits to find repo_id
+                # If we have repo_id set, check if first parts match
+                if self.repo_id:
+                    repo_parts = self.repo_id.split("/")
+                    if len(parts) >= len(repo_parts) + 2:
+                        # Check if first parts match repo_id
+                        if "/".join(parts[:len(repo_parts)]) == self.repo_id:
+                            repo_id = self.repo_id
+                            phase_name = parts[len(repo_parts)]
+                            filename = "/".join(parts[len(repo_parts)+1:])
+                            hf_path = f"{phase_name}/{filename}"
+                else:
+                    # Try to detect: assume repo_id is first part(s) if it contains "/"
+                    # For now, try 2-part repo_id (user/repo)
+                    if len(parts) >= 4:
+                        potential_repo = f"{parts[0]}/{parts[1]}"
+                        phase_name = parts[2]
+                        filename = "/".join(parts[3:])
+                        repo_id = potential_repo
+                        hf_path = f"{phase_name}/{filename}"
+        
+        # Format 3: Just filename or phase_name/filename - use repo_id and phase_name from settings
+        if not hf_path and self.repo_id and self.phase_name:
+            # Check if it's just a filename (no slashes)
+            if "/" not in checkpoint_input:
+                repo_id = self.repo_id
+                filename = checkpoint_input
+                hf_path = f"{self.phase_name}/{filename}"
+            # Or if it's phase_name/filename
+            elif checkpoint_input.count("/") == 1:
+                parts = checkpoint_input.split("/", 1)
+                if parts[0] == self.phase_name:
+                    repo_id = self.repo_id
+                    filename = parts[1]
+                    hf_path = checkpoint_input
+        
+        # Download from Hugging Face if we identified an HF path
+        if hf_path and repo_id:
+            try:
+                token = HfFolder.get_token()
+                if not token:
+                    print("⚠️ Hugging Face token not found. Run `huggingface-cli login` first.")
+                    print(f"   Attempting to download without token (public repos only)...")
+                
+                print(f"📥 Downloading checkpoint from Hugging Face: {repo_id}/{hf_path}")
+                
+                # Download to temp location (for Kaggle - no local saving)
+                downloaded_path = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=hf_path,
+                    repo_type="model",
+                    token=token,
+                    cache_dir=tempfile.gettempdir()
+                )
+                
+                print(f"✅ Checkpoint downloaded to: {downloaded_path}")
+                return downloaded_path
+                
+            except Exception as e:
+                print(f"⚠️ Failed to download checkpoint from Hugging Face: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+        
+        # If we couldn't resolve it, return None
+        return None
 
     def _set_default_settings(self):
         default = {
@@ -318,48 +444,92 @@ class LTRTrainer(BaseTrainer):
 
         # Save checkpoint and IoU plot
         if misc.is_main_process():
-            try:
-                # Use consistent naming with base trainer
-                net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
-                net_type = type(net).__name__
-                ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
-                ckpt_path = os.path.join(self.phase_dir, ckpt_name)
+            # Local checkpoint saving - COMMENTED OUT for Kaggle
+            # try:
+            #     # Use consistent naming with base trainer
+            #     net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
+            #     net_type = type(net).__name__
+            #     ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
+            #     ckpt_path = os.path.join(self.phase_dir, ckpt_name)
 
-                # Include all necessary fields for proper resuming
-                state = {
-                    'epoch': self.epoch,
-                    'actor_type': type(self.actor).__name__,
-                    'net_type': net_type,
-                    'net': net.state_dict(),
-                    'net_info': getattr(net, 'info', None),
-                    'constructor': getattr(net, 'constructor', None),
-                    'optimizer': self.optimizer.state_dict(),
-                    'stats': self.stats,
-                    'iou_values': self.iou_values,  # SAVE IoU values for continuity
-                    'loss_values': self.loss_values,  # SAVE Loss values for continuity
-                    'settings': self.settings
-                }
+            #     # Include all necessary fields for proper resuming
+            #     state = {
+            #         'epoch': self.epoch,
+            #         'actor_type': type(self.actor).__name__,
+            #         'net_type': net_type,
+            #         'net': net.state_dict(),
+            #         'net_info': getattr(net, 'info', None),
+            #         'constructor': getattr(net, 'constructor', None),
+            #         'optimizer': self.optimizer.state_dict(),
+            #         'stats': self.stats,
+            #         'iou_values': self.iou_values,  # SAVE IoU values for continuity
+            #         'loss_values': self.loss_values,  # SAVE Loss values for continuity
+            #         'settings': self.settings
+            #     }
                 
-                # Save random state for reproducible resuming
-                import random
-                import numpy as np
-                state['random_state'] = {
-                    'python': random.getstate(),
-                    'numpy': np.random.get_state(),
-                    'torch': torch.get_rng_state(),
-                    'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
-                }
+            #     # Save random state for reproducible resuming
+            #     import random
+            #     import numpy as np
+            #     state['random_state'] = {
+            #         'python': random.getstate(),
+            #         'numpy': np.random.get_state(),
+            #         'torch': torch.get_rng_state(),
+            #         'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+            #     }
 
-                # Atomic save operation
-                tmp_path = ckpt_path + ".tmp"
-                torch.save(state, tmp_path)
-                if os.path.exists(ckpt_path):
-                    os.remove(ckpt_path)
-                os.rename(tmp_path, ckpt_path)
+            #     # Atomic save operation
+            #     tmp_path = ckpt_path + ".tmp"
+            #     torch.save(state, tmp_path)
+            #     if os.path.exists(ckpt_path):
+            #         os.remove(ckpt_path)
+            #     os.rename(tmp_path, ckpt_path)
 
-            except Exception as e:
-                print("⚠️ Failed to save checkpoint:", e)
-                traceback.print_exc()
+            # except Exception as e:
+            #     print("⚠️ Failed to save checkpoint:", e)
+            #     traceback.print_exc()
+
+            # Prepare checkpoint path for Hugging Face upload (only when needed)
+            ckpt_path = None
+            if self.repo_id and self.epoch % 5 == 0:
+                try:
+                    net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
+                    net_type = type(net).__name__
+                    ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
+                    # Use a temporary location for checkpoint (won't be saved locally)
+                    temp_dir = tempfile.gettempdir()
+                    ckpt_path = os.path.join(temp_dir, ckpt_name)
+                    
+                    # Include all necessary fields for proper resuming
+                    state = {
+                        'epoch': self.epoch,
+                        'actor_type': type(self.actor).__name__,
+                        'net_type': net_type,
+                        'net': net.state_dict(),
+                        'net_info': getattr(net, 'info', None),
+                        'constructor': getattr(net, 'constructor', None),
+                        'optimizer': self.optimizer.state_dict(),
+                        'stats': self.stats,
+                        'iou_values': self.iou_values,
+                        'loss_values': self.loss_values,
+                        'settings': self.settings
+                    }
+                    
+                    # Save random state for reproducible resuming
+                    import random
+                    import numpy as np
+                    state['random_state'] = {
+                        'python': random.getstate(),
+                        'numpy': np.random.get_state(),
+                        'torch': torch.get_rng_state(),
+                        'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+                    }
+
+                    # Save to temp location for upload
+                    torch.save(state, ckpt_path)
+                except Exception as e:
+                    print("⚠️ Failed to prepare checkpoint for upload:", e)
+                    traceback.print_exc()
+                    ckpt_path = None
 
             # IoU and Loss plots - show complete training history
             iou_fig_path = None
@@ -434,19 +604,27 @@ class LTRTrainer(BaseTrainer):
                     if not token:
                         print("⚠️ Hugging Face token not found. Run `huggingface-cli login` first.")
                     else:
-                        try:
-                            upload_file(
-                                path_or_fileobj=ckpt_path,
-                                path_in_repo=f"{self.phase_name}/{os.path.basename(ckpt_path)}",
-                                repo_id=self.repo_id,
-                                repo_type="model",
-                                token=token,
-                            )
-                            print(f"Uploaded checkpoint to Hugging Face: {self.repo_id}/{self.phase_name}")
-                        except Exception as e:
-                            print("⚠️ Failed uploading checkpoint to Hugging Face:", e)
+                        # Upload checkpoint only every 5 epochs
+                        if ckpt_path and self.epoch % 5 == 0:
+                            try:
+                                upload_file(
+                                    path_or_fileobj=ckpt_path,
+                                    path_in_repo=f"{self.phase_name}/{os.path.basename(ckpt_path)}",
+                                    repo_id=self.repo_id,
+                                    repo_type="model",
+                                    token=token,
+                                )
+                                print(f"Uploaded checkpoint to Hugging Face: {self.repo_id}/{self.phase_name}")
+                                # Clean up temp checkpoint file after upload
+                                try:
+                                    if os.path.exists(ckpt_path):
+                                        os.remove(ckpt_path)
+                                except:
+                                    pass
+                            except Exception as e:
+                                print("⚠️ Failed uploading checkpoint to Hugging Face:", e)
 
-                        # Upload IoU plot
+                        # Upload IoU plot every epoch
                         if iou_fig_path:
                             try:
                                 upload_file(
@@ -460,7 +638,7 @@ class LTRTrainer(BaseTrainer):
                             except Exception as e:
                                 print("⚠️ Failed uploading IoU plot to Hugging Face:", e)
 
-                        # Upload Loss plot
+                        # Upload Loss plot every epoch
                         if loss_fig_path:
                             try:
                                 upload_file(
@@ -591,8 +769,15 @@ class LTRTrainer(BaseTrainer):
                     directory_teacher = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_teacher)
                     self.load_state_dict(directory_teacher, distill=True)
                 
-                # Modified training loop to skip already trained epochs
-                for epoch in range(self.epoch+1, max_epochs+1):
+                # Modified training loop - start from epoch+1 to max_epochs
+                # If no resume checkpoint, self.epoch is 0, so training starts from epoch 1
+                start_epoch = self.epoch + 1
+                if start_epoch == 1:
+                    print(f"[{self.phase_name}] 🚀 Starting training from epoch 1 to {max_epochs}")
+                else:
+                    print(f"[{self.phase_name}] 🔁 Resuming training from epoch {start_epoch} to {max_epochs}")
+                
+                for epoch in range(start_epoch, max_epochs+1):
                     self.epoch = epoch
                     
                     # No epoch skipping - retrain for reproducible results
@@ -605,10 +790,10 @@ class LTRTrainer(BaseTrainer):
                         else:
                             self.lr_scheduler.step(epoch - 1)
                     
-                    # Save checkpoint at the end of every epoch
-                    if self._checkpoint_dir:
-                        if self.settings.local_rank in [-1, 0]:
-                            self.save_checkpoint()
+                    # Save checkpoint at the end of every epoch - COMMENTED OUT for Kaggle
+                    # if self._checkpoint_dir:
+                    #     if self.settings.local_rank in [-1, 0]:
+                    #         self.save_checkpoint()
                             
             except:
                 print(f'[{self.phase_name}] Training crashed at epoch {epoch}')
@@ -625,48 +810,47 @@ class LTRTrainer(BaseTrainer):
 
     def save_checkpoint(self):
         """Override base trainer's save_checkpoint to use phase-specific directory"""
-        # This method is called by the base trainer, but we handle saving in train_epoch
-        # So we can either implement it here or let the base trainer handle it
-        # For now, we'll implement a simple version that saves to phase directory
-        if not misc.is_main_process():
-            return
+        # Local checkpoint saving - COMMENTED OUT for Kaggle
+        # if not misc.is_main_process():
+        #     return
             
-        try:
-            net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
-            net_type = type(net).__name__
-            ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
-            ckpt_path = os.path.join(self.phase_dir, ckpt_name)
+        # try:
+        #     net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
+        #     net_type = type(net).__name__
+        #     ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
+        #     ckpt_path = os.path.join(self.phase_dir, ckpt_name)
 
-            state = {
-                'epoch': self.epoch,
-                'actor_type': type(self.actor).__name__,
-                'net_type': net_type,
-                'net': net.state_dict(),
-                'net_info': getattr(net, 'info', None),
-                'constructor': getattr(net, 'constructor', None),
-                'optimizer': self.optimizer.state_dict(),
-                'stats': self.stats,
-                'iou_values': self.iou_values,
-                'loss_values': self.loss_values,
-                'settings': self.settings
-            }
+        #     state = {
+        #         'epoch': self.epoch,
+        #         'actor_type': type(self.actor).__name__,
+        #         'net_type': net_type,
+        #         'net': net.state_dict(),
+        #         'net_info': getattr(net, 'info', None),
+        #         'constructor': getattr(net, 'constructor', None),
+        #         'optimizer': self.optimizer.state_dict(),
+        #         'stats': self.stats,
+        #         'iou_values': self.iou_values,
+        #         'loss_values': self.loss_values,
+        #         'settings': self.settings
+        #     }
             
-            # Save random state for reproducible resuming
-            import random
-            import numpy as np
-            state['random_state'] = {
-                'python': random.getstate(),
-                'numpy': np.random.get_state(),
-                'torch': torch.get_rng_state(),
-                'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
-            }
+        #     # Save random state for reproducible resuming
+        #     import random
+        #     import numpy as np
+        #     state['random_state'] = {
+        #         'python': random.getstate(),
+        #         'numpy': np.random.get_state(),
+        #         'torch': torch.get_rng_state(),
+        #         'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+        #     }
 
-            tmp_path = ckpt_path + ".tmp"
-            torch.save(state, tmp_path)
-            if os.path.exists(ckpt_path):
-                os.remove(ckpt_path)
-            os.rename(tmp_path, ckpt_path)
+        #     tmp_path = ckpt_path + ".tmp"
+        #     torch.save(state, tmp_path)
+        #     if os.path.exists(ckpt_path):
+        #         os.remove(ckpt_path)
+        #     os.rename(tmp_path, ckpt_path)
             
-            print(f"Phase checkpoint saved at: {ckpt_path}")
-        except Exception as e:
-            print("⚠️ Failed to save phase checkpoint:", e)
+        #     print(f"Phase checkpoint saved at: {ckpt_path}")
+        # except Exception as e:
+        #     print("⚠️ Failed to save phase checkpoint:", e)
+        pass  # Local checkpoint saving disabled for Kaggle

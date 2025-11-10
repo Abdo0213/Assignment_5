@@ -44,7 +44,7 @@ class Lasot(BaseVideoDataset):
 
         self.sequence_list = self._build_sequence_list(vid_ids, split)
 
-        target_classes = ['book','coin']
+        target_classes = ['coin']
 
         # Filter the sequence_list to keep only sequences from the target classes
         print("Original number of sequences:", len(self.sequence_list))
