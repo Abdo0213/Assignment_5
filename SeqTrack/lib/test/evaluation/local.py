@@ -1,3 +1,51 @@
+import os
+from lib.test.evaluation.environment import EnvSettings
+from lib.train.admin.environment import env_settings as train_env_settings
+
+
+def local_env_settings():
+    """
+    Test/evaluation paths are copied from the training local settings.
+    Edit lib/train/admin/local.py (EnvironmentSettings) to change roots,
+    then this file will reflect the same dataset/workspace locations.
+    """
+    train_env = train_env_settings()
+
+    workspace_dir = getattr(train_env, 'workspace_dir', '') or os.getcwd()
+    results_path = os.path.join(workspace_dir, 'test', 'tracking_results')
+    segmentation_path = os.path.join(workspace_dir, 'test', 'segmentation_results')
+    network_path = os.path.join(workspace_dir, 'test', 'networks')
+    result_plot_path = os.path.join(workspace_dir, 'test', 'result_plots')
+
+    s = EnvSettings()
+    s.results_path = results_path
+    s.segmentation_path = segmentation_path
+    s.network_path = network_path
+    s.result_plot_path = result_plot_path
+
+    # Datasets: mirror training local paths
+    s.otb_path = ''
+    s.nfs_path = ''
+    s.uav_path = ''
+    s.tpl_path = ''
+    s.vot_path = ''
+    s.got10k_path = getattr(train_env, 'got10k_dir', '')
+    s.lasot_path = getattr(train_env, 'lasot_dir', '')
+    s.trackingnet_path = getattr(train_env, 'trackingnet_dir', '')
+    s.davis_dir = getattr(train_env, 'davis_dir', '')
+    s.youtubevos_dir = getattr(train_env, 'youtubevos_dir', '')
+    s.got_packed_results_path = ''
+    s.got_reports_path = ''
+    s.tn_packed_results_path = ''
+
+    # Ensure output dirs exist
+    for p in [s.results_path, s.segmentation_path, s.network_path, s.result_plot_path]:
+        try:
+            os.makedirs(p, exist_ok=True)
+        except Exception:
+            pass
+
+    return s
 from lib.test.evaluation.environment import EnvSettings
 
 def local_env_settings():

@@ -41,15 +41,18 @@ class Assignment4Evaluator:
     """Evaluator for Assignment 4 - Test and Evaluation"""
     
     def __init__(self, repo_id, phase_name, start_epoch=1, end_epoch=10, 
-                 dataset_name='lasot', temp_dir=None, upload_prefix="member_10_abdelrahman_ahmed/test"):
+                 dataset_name='lasot', temp_dir=None, upload_prefix="member_10_abdelrahman_ahmed/test",
+                 resume_epoch=None):
         self.repo_id = repo_id
         self.phase_name = phase_name
+        self.safe_phase = phase_name.replace('/', '_').replace('\\', '_')
         self.start_epoch = start_epoch
         self.end_epoch = end_epoch
         self.dataset_name = dataset_name
         self.temp_dir = temp_dir or tempfile.gettempdir()
         self.upload_prefix = upload_prefix
-        self.results_dir = os.path.join(self.temp_dir, f"assignment_4_results_{phase_name}")
+        self.resume_epoch = resume_epoch
+        self.results_dir = os.path.join(self.temp_dir, f"assignment_4_results_{self.safe_phase}")
         os.makedirs(self.results_dir, exist_ok=True)
         
         # Storage for results
@@ -82,6 +85,13 @@ class Assignment4Evaluator:
                         continue
             
             checkpoints.sort(key=lambda x: x[0])
+
+            # Apply resume filter if requested
+            if self.resume_epoch is not None:
+                checkpoints = [(epoch, path) for epoch, path in checkpoints if epoch >= self.resume_epoch]
+                if not checkpoints:
+                    print(f"⚠️ Resume epoch {self.resume_epoch} is higher than available checkpoints. Nothing to do.")
+                    checkpoints = []
             print(f"📋 Found {len(checkpoints)} checkpoints for {self.phase_name}: epochs {[c[0] for c in checkpoints]}")
             return checkpoints
             
@@ -303,7 +313,7 @@ class Assignment4Evaluator:
             })
         
         df_table1 = pd.DataFrame(table1_data)
-        table1_path = os.path.join(self.results_dir, f"{self.phase_name}_table1_inference_rate.csv")
+        table1_path = os.path.join(self.results_dir, f"{self.safe_phase}_table1_inference_rate.csv")
         df_table1.to_csv(table1_path, index=False)
         print(f"\n📊 Table 1 (Inference Rate) saved to: {table1_path}")
         print(df_table1.to_string(index=False))
@@ -320,7 +330,7 @@ class Assignment4Evaluator:
             })
         
         df_table2 = pd.DataFrame(table2_data)
-        table2_path = os.path.join(self.results_dir, f"{self.phase_name}_table2_evaluation.csv")
+        table2_path = os.path.join(self.results_dir, f"{self.safe_phase}_table2_evaluation.csv")
         df_table2.to_csv(table2_path, index=False)
         print(f"\n📊 Table 2 (Evaluation Results) saved to: {table2_path}")
         print(df_table2.to_string(index=False))
@@ -389,7 +399,7 @@ class Assignment4Evaluator:
         axes[2].set_xticks(epochs)
         
         plt.tight_layout()
-        graph_path = os.path.join(self.results_dir, f"{self.phase_name}_metrics_vs_epoch.png")
+        graph_path = os.path.join(self.results_dir, f"{self.safe_phase}_metrics_vs_epoch.png")
         plt.savefig(graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Graph saved to: {graph_path}")
@@ -407,7 +417,7 @@ class Assignment4Evaluator:
         ax.set_xticks(epochs)
         
         plt.tight_layout()
-        combined_graph_path = os.path.join(self.results_dir, f"{self.phase_name}_combined_metrics.png")
+        combined_graph_path = os.path.join(self.results_dir, f"{self.safe_phase}_combined_metrics.png")
         plt.savefig(combined_graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Combined graph saved to: {combined_graph_path}")
@@ -479,7 +489,7 @@ class Assignment4Evaluator:
             'evaluation_results': self.evaluation_results,
             'inference_rates': self.inference_rates
         }
-        summary_path = os.path.join(self.results_dir, f"{self.phase_name}_summary.json")
+        summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
         with open(summary_path, 'w') as f:
             json.dump(summary, f, indent=2)
         print(f"\n💾 Summary saved to: {summary_path}")
@@ -519,6 +529,8 @@ def main():
                         help='Temporary directory for downloads (default: system temp)')
     parser.add_argument('--upload_prefix', type=str, default="member_10_abdelrahman_ahmed/test",
                         help='Subfolder path inside repo to store test artifacts (tables, graphs)')
+    parser.add_argument('--resume_epoch', type=int, default=None,
+                        help='Resume from this epoch (skip earlier checkpoints)')
     
     args = parser.parse_args()
     
@@ -529,7 +541,8 @@ def main():
         end_epoch=args.end_epoch,
         dataset_name=args.dataset_name,
         temp_dir=args.temp_dir,
-        upload_prefix=args.upload_prefix
+        upload_prefix=args.upload_prefix,
+        resume_epoch=args.resume_epoch
     )
     
     evaluator.run_full_evaluation()
