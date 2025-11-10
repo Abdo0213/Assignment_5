@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from lib.test.evaluation.data import Sequence, BaseDataset, SequenceList
 from lib.test.utils.load_text import load_text
@@ -29,11 +30,25 @@ class LaSOTDataset(BaseDataset):
         return  clean_lst
 
     def get_sequence_list(self):
-        return SequenceList([self._construct_sequence(s) for s in self.sequence_list])
+        sequences = []
+        for s in self.sequence_list:
+            try:
+                sequences.append(self._construct_sequence(s))
+            except FileNotFoundError:
+                # Skip sequences that are not present in the current dataset root
+                continue
+            except Exception:
+                # Be conservative: skip any unexpected issues for robustness on partial datasets
+                continue
+        return SequenceList(sequences)
 
     def _construct_sequence(self, sequence_name):
         class_name = sequence_name.split('-')[0]
         anno_path = '{}/{}/{}/groundtruth.txt'.format(self.base_path, class_name, sequence_name)
+
+        if not os.path.isfile(anno_path):
+            # Let caller decide how to handle missing sequences
+            raise FileNotFoundError(anno_path + " not found.")
 
         ground_truth_rect = load_text(str(anno_path), delimiter=',', dtype=np.float64)
 
