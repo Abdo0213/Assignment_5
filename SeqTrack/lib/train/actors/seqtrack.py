@@ -85,19 +85,48 @@ class SeqTrackActor(BaseActor):
         # weighted sum
         loss = self.loss_weight['ce'] * ce_loss
 
-        outputs = outputs.softmax(-1)
+        # Stabilize logits before softmax (avoid NaN from inf logits)
+        outputs = torch.nan_to_num(outputs, nan=0.0, posinf=1e6, neginf=-1e6).softmax(-1)
         outputs = outputs[:, :self.BINS]
         value, extra_seq = outputs.topk(dim=-1, k=1)
-        boxes_pred = extra_seq.squeeze(-1).reshape(-1,5)[:, 0:-1]
-        boxes_target = targets_seq.reshape(-1,5)[:,0:-1]
-        boxes_pred = box_cxcywh_to_xyxy(boxes_pred)
-        boxes_target = box_cxcywh_to_xyxy(boxes_target)
-        iou = box_iou(boxes_pred, boxes_target)[0].mean()
+        boxes_pred = extra_seq.squeeze(-1).reshape(-1,5)[:, 0:-1].float()
+        # Clamp predicted discrete coords into valid range
+        boxes_pred = boxes_pred.clamp(min=0.0, max=float(self.BINS - 1))
+        boxes_target = targets_seq.reshape(-1,5)[:,0:-1].float()
+        # Convert to xyxy
+        boxes_pred_xyxy = box_cxcywh_to_xyxy(boxes_pred)
+        boxes_target_xyxy = box_cxcywh_to_xyxy(boxes_target)
+        # Ensure finite
+        boxes_pred_xyxy = torch.nan_to_num(boxes_pred_xyxy, nan=0.0, posinf=0.0, neginf=0.0)
+        boxes_target_xyxy = torch.nan_to_num(boxes_target_xyxy, nan=0.0, posinf=0.0, neginf=0.0)
+        # Enforce proper ordering and minimal size
+        x0p, y0p, x1p, y1p = boxes_pred_xyxy.unbind(-1)
+        x0p_, x1p_ = torch.minimum(x0p, x1p), torch.maximum(x0p, x1p)
+        y0p_, y1p_ = torch.minimum(y0p, y1p), torch.maximum(y0p, y1p)
+        eps = 1e-6
+        x1p_ = torch.maximum(x1p_, x0p_ + eps)
+        y1p_ = torch.maximum(y1p_, y0p_ + eps)
+        boxes_pred_xyxy = torch.stack([x0p_, y0p_, x1p_, y1p_], dim=-1)
+
+        x0t, y0t, x1t, y1t = boxes_target_xyxy.unbind(-1)
+        x0t_, x1t_ = torch.minimum(x0t, x1t), torch.maximum(x0t, x1t)
+        y0t_, y1t_ = torch.minimum(y0t, y1t), torch.maximum(y0t, y1t)
+        x1t_ = torch.maximum(x1t_, x0t_ + eps)
+        y1t_ = torch.maximum(y1t_, y0t_ + eps)
+        boxes_target_xyxy = torch.stack([x0t_, y0t_, x1t_, y1t_], dim=-1)
+        # Compute IoU with robustness to degenerate boxes
+        iou_vec, union_vec = box_iou(boxes_pred_xyxy, boxes_target_xyxy)
+        valid = torch.isfinite(iou_vec) & (union_vec > eps)
+        iou_value = None
+        if valid.any():
+            iou_value = iou_vec[valid].mean().item()
 
         if return_status:
             # status for log
-            status = {"Loss/total": loss.item(),
-                      "IoU": iou.item()}
+            status = {"Loss/total": loss.item()}
+            # Only update IoU meter if we computed a valid value; otherwise, keep previous average
+            if iou_value is not None and torch.isfinite(torch.tensor(iou_value)):
+                status["IoU"] = float(iou_value)
             return loss, status
         else:
             return loss
