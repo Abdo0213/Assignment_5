@@ -61,7 +61,7 @@ class Assignment4Evaluator:
         self.per_sequence_metrics = {}  # sequence -> {epoch -> metrics}
 
         # Load previous summary if resuming
-        self.summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
+        self.summary_path = os.path.join(self.results_dir, f"summary.json")
         if os.path.exists(self.summary_path):
             try:
                 with open(self.summary_path, 'r') as f:
@@ -392,7 +392,7 @@ class Assignment4Evaluator:
             })
         
         df_table1 = pd.DataFrame(table1_data)
-        table1_path = os.path.join(self.results_dir, f"{self.safe_phase}_table1_inference_rate.csv")
+        table1_path = os.path.join(self.results_dir, f"table1_inference_rate.csv")
         df_table1.to_csv(table1_path, index=False)
         print(f"\n📊 Table 1 (Inference Rate) saved to: {table1_path}")
         print(df_table1.to_string(index=False))
@@ -409,7 +409,7 @@ class Assignment4Evaluator:
             })
         
         df_table2 = pd.DataFrame(table2_data)
-        table2_path = os.path.join(self.results_dir, f"{self.safe_phase}_table2_evaluation.csv")
+        table2_path = os.path.join(self.results_dir, f"table2_evaluation.csv")
         df_table2.to_csv(table2_path, index=False)
         print(f"\n📊 Table 2 (Evaluation Results) saved to: {table2_path}")
         print(df_table2.to_string(index=False))
@@ -429,7 +429,7 @@ class Assignment4Evaluator:
             df_table3 = pd.DataFrame(seq_rows).sort_values(by=['Sequence', 'Epoch'])
         else:
             df_table3 = pd.DataFrame(columns=['Sequence', 'Epoch', 'IoU', 'Precision', 'AUC'])
-        table3_path = os.path.join(self.results_dir, f"{self.safe_phase}_table3_per_sequence.csv")
+        table3_path = os.path.join(self.results_dir, f"table3_per_sequence.csv")
         df_table3.to_csv(table3_path, index=False)
         print(f"\n📊 Table 3 (Per-sequence Metrics) saved to: {table3_path}")
         
@@ -476,7 +476,7 @@ class Assignment4Evaluator:
         axes[0].plot(epochs, iou_values, marker='o', linewidth=2, markersize=6, color='blue')
         axes[0].set_xlabel('Epoch', fontsize=12)
         axes[0].set_ylabel('IoU', fontsize=12)
-        axes[0].set_title(f'IoU vs Epoch - {self.phase_name}', fontsize=14, fontweight='bold')
+        axes[0].set_title(f'IoU vs Epoch', fontsize=14, fontweight='bold')
         axes[0].grid(True, alpha=0.3)
         axes[0].set_xticks(epochs)
         
@@ -484,7 +484,7 @@ class Assignment4Evaluator:
         axes[1].plot(epochs, precision_values, marker='s', linewidth=2, markersize=6, color='green')
         axes[1].set_xlabel('Epoch', fontsize=12)
         axes[1].set_ylabel('Precision', fontsize=12)
-        axes[1].set_title(f'Precision vs Epoch - {self.phase_name}', fontsize=14, fontweight='bold')
+        axes[1].set_title(f'Precision vs Epoch', fontsize=14, fontweight='bold')
         axes[1].grid(True, alpha=0.3)
         axes[1].set_xticks(epochs)
         
@@ -492,12 +492,12 @@ class Assignment4Evaluator:
         axes[2].plot(epochs, auc_values, marker='^', linewidth=2, markersize=6, color='red')
         axes[2].set_xlabel('Epoch', fontsize=12)
         axes[2].set_ylabel('AUC', fontsize=12)
-        axes[2].set_title(f'AUC vs Epoch - {self.phase_name}', fontsize=14, fontweight='bold')
+        axes[2].set_title(f'AUC vs Epoch', fontsize=14, fontweight='bold')
         axes[2].grid(True, alpha=0.3)
         axes[2].set_xticks(epochs)
         
         plt.tight_layout()
-        graph_path = os.path.join(self.results_dir, f"{self.safe_phase}_metrics_vs_epoch.png")
+        graph_path = os.path.join(self.results_dir, f"metrics_vs_epoch.png")
         plt.savefig(graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Graph saved to: {graph_path}")
@@ -509,13 +509,13 @@ class Assignment4Evaluator:
         ax.plot(epochs, auc_values, marker='^', linewidth=2, markersize=6, label='AUC', color='red')
         ax.set_xlabel('Epoch', fontsize=12)
         ax.set_ylabel('Metric Value', fontsize=12)
-        ax.set_title(f'Evaluation Metrics vs Epoch - {self.phase_name}', fontsize=14, fontweight='bold')
+        ax.set_title(f'Evaluation Metrics vs Epoch', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=11)
         ax.set_xticks(epochs)
         
         plt.tight_layout()
-        combined_graph_path = os.path.join(self.results_dir, f"{self.safe_phase}_combined_metrics.png")
+        combined_graph_path = os.path.join(self.results_dir, f"combined_metrics.png")
         plt.savefig(combined_graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Combined graph saved to: {combined_graph_path}")
@@ -544,7 +544,7 @@ class Assignment4Evaluator:
     def run_full_evaluation(self):
         """Run complete evaluation pipeline"""
         print(f"\n{'='*80}")
-        print(f"Assignment 4: Test and Evaluation - {self.phase_name}")
+        print(f"Assignment 4: Test and Evaluation")
         print(f"{'='*80}\n")
         
         # Step 1: List checkpoints
@@ -588,7 +588,7 @@ class Assignment4Evaluator:
             'inference_rates': self.inference_rates,
             'per_sequence_metrics': self.per_sequence_metrics
         }
-        summary_path = os.path.join(self.results_dir, f"{self.safe_phase}_summary.json")
+        summary_path = os.path.join(self.results_dir, f"summary.json")
         with open(summary_path, 'w') as f:
             json.dump(summary, f, indent=2)
         print(f"\n💾 Summary saved to: {summary_path}")

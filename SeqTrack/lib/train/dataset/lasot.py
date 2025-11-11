@@ -11,6 +11,37 @@ from lib.train.data import jpeg4py_loader
 from lib.train.admin import env_settings
 
 
+def _read_classes_file(default_root):
+    """
+    Read target classes from a text file if provided.
+    Lookup order:
+      1) Environment variable LASOT_CLASSES_FILE
+      2) classes.txt in the provided default_root (repo root)
+      3) classes.txt in current working directory
+    File format: one class name per line; empty lines and lines starting with '#' are ignored.
+    """
+    possible_paths = []
+    env_path = os.environ.get('LASOT_CLASSES_FILE', '').strip()
+    if env_path:
+        possible_paths.append(env_path)
+    # repo root relative to this file: lib/train/dataset/ -> project root two levels up
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    possible_paths.append(os.path.join(default_root or repo_root, 'classes.txt'))
+    possible_paths.append(os.path.join(os.getcwd(), 'classes.txt'))
+
+    for path in possible_paths:
+        try:
+            if path and os.path.isfile(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    lines = [ln.strip() for ln in f.readlines()]
+                classes = [ln for ln in lines if ln and not ln.startswith('#')]
+                if classes:
+                    return classes
+        except Exception:
+            continue
+    return None
+
+
 class Lasot(BaseVideoDataset):
     """ LaSOT dataset.
 
@@ -44,13 +75,14 @@ class Lasot(BaseVideoDataset):
 
         self.sequence_list = self._build_sequence_list(vid_ids, split)
 
-        target_classes = ['coin']
-
-        # Filter the sequence_list to keep only sequences from the target classes
-        print("Original number of sequences:", len(self.sequence_list))
-        filtered_list = [seq for seq in self.sequence_list if seq.split('-')[0] in target_classes]
-        self.sequence_list = filtered_list
-        print("Number of sequences after filtering for {}: {}".format(target_classes, len(self.sequence_list)))
+        # Optionally filter by target classes from a text file
+        target_classes = _read_classes_file(default_root=None)
+        if target_classes is not None:
+            print("Original number of sequences:", len(self.sequence_list))
+            filtered_list = [seq for seq in self.sequence_list if seq.split('-')[0] in set(target_classes)]
+            self.sequence_list = filtered_list
+            print("Filtering LaSOT by classes.txt -> {} classes".format(len(set(target_classes))))
+            print("Number of sequences after filtering: {}".format(len(self.sequence_list)))
 
         if data_fraction is not None:
             self.sequence_list = random.sample(self.sequence_list, int(len(self.sequence_list)*data_fraction))
