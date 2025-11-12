@@ -486,16 +486,25 @@ class LTRTrainer(BaseTrainer):
             #     print("⚠️ Failed to save checkpoint:", e)
             #     traceback.print_exc()
 
-            # Prepare checkpoint path for Hugging Face upload (only when needed)
+            # ========================================================================
+            # CHECKPOINT SAVING CONFIGURATION
+            # ========================================================================
+            # To toggle local checkpoint saving:
+            # - Set SAVE_CHECKPOINTS_LOCALLY = True to save checkpoints locally in phase_dir
+            # - Set SAVE_CHECKPOINTS_LOCALLY = False to only save to temp (for HF upload only)
+            # ========================================================================
+            SAVE_CHECKPOINTS_LOCALLY = True  # Change this to False to disable local saving
+            
+            # Prepare checkpoint path
             ckpt_path = None
-            if self.repo_id and self.epoch % 5 == 0:
+            ckpt_path_local = None  # Local checkpoint path (for manual upload from Kaggle)
+            
+            # Save checkpoint every 5 epochs (or adjust as needed)
+            if self.epoch % 5 == 0:
                 try:
                     net = self.actor.net.module if hasattr(self.actor.net, 'module') else self.actor.net
                     net_type = type(net).__name__
                     ckpt_name = f"{net_type}_ep{self.epoch:04d}.pth.tar"
-                    # Use a temporary location for checkpoint (won't be saved locally)
-                    temp_dir = tempfile.gettempdir()
-                    ckpt_path = os.path.join(temp_dir, ckpt_name)
                     
                     # Include all necessary fields for proper resuming
                     state = {
@@ -522,13 +531,36 @@ class LTRTrainer(BaseTrainer):
                         'torch_cuda': torch.cuda.get_rng_state() if torch.cuda.is_available() else None
                     }
 
-                    # Save to temp location for upload
-                    torch.save(state, ckpt_path)
+                    # Save locally if enabled (for manual upload from Kaggle if run stops)
+                    if SAVE_CHECKPOINTS_LOCALLY:
+                        ckpt_path_local = os.path.join(self.phase_dir, ckpt_name)
+                        # Atomic save operation
+                        tmp_path_local = ckpt_path_local + ".tmp"
+                        torch.save(state, tmp_path_local)
+                        if os.path.exists(ckpt_path_local):
+                            os.remove(ckpt_path_local)
+                        os.rename(tmp_path_local, ckpt_path_local)
+                        print(f"[{self.phase_name}] ✅ Checkpoint saved locally: {ckpt_path_local}")
+                    
+                    # Also save to temp location for HF upload (if repo_id is set)
+                    if self.repo_id:
+                        temp_dir = tempfile.gettempdir()
+                        ckpt_path = os.path.join(temp_dir, ckpt_name)
+                        torch.save(state, ckpt_path)
                 except Exception as e:
-                    print("⚠️ Failed to prepare checkpoint for upload:", e)
+                    print("⚠️ Failed to prepare checkpoint:", e)
                     traceback.print_exc()
                     ckpt_path = None
+                    ckpt_path_local = None
 
+            # ========================================================================
+            # DIAGRAM SAVING CONFIGURATION
+            # ========================================================================
+            # Diagrams (IoU and Loss plots) are ALWAYS saved locally to phase_dir
+            # This allows manual upload from Kaggle if the run stops
+            # To disable local saving, comment out the plt.savefig() calls below
+            # ========================================================================
+            
             # IoU and Loss plots - show complete training history
             iou_fig_path = None
             loss_fig_path = None
@@ -595,6 +627,14 @@ class LTRTrainer(BaseTrainer):
                 loss_fig_path = None
 
 
+            # ========================================================================
+            # HUGGING FACE UPLOAD CONFIGURATION
+            # ========================================================================
+            # Optional: Upload checkpoints and diagrams to Hugging Face
+            # Local files are preserved even after upload (for manual backup from Kaggle)
+            # To disable HF upload, set repo_id=None in training command
+            # ========================================================================
+            
             # Optional Hugging Face upload
             if self.repo_id:
                 try:
@@ -613,8 +653,8 @@ class LTRTrainer(BaseTrainer):
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded checkpoint to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(ckpt_path)}")
-                                # Clean up temp checkpoint file after upload
+                                print(f"⬆️ Uploaded checkpoint to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(ckpt_path)}")
+                                # Clean up temp checkpoint file after upload (local checkpoint is preserved)
                                 try:
                                     if os.path.exists(ckpt_path):
                                         os.remove(ckpt_path)
@@ -623,7 +663,7 @@ class LTRTrainer(BaseTrainer):
                             except Exception as e:
                                 print("⚠️ Failed uploading checkpoint to Hugging Face:", e)
 
-                        # Upload IoU plot every epoch
+                        # Upload IoU plot every epoch (local file is preserved for manual upload)
                         if iou_fig_path:
                             try:
                                 upload_file(
@@ -633,11 +673,11 @@ class LTRTrainer(BaseTrainer):
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded IoU plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(iou_fig_path)}")
+                                print(f"⬆️ Uploaded IoU plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(iou_fig_path)}")
                             except Exception as e:
                                 print("⚠️ Failed uploading IoU plot to Hugging Face:", e)
 
-                        # Upload Loss plot every epoch
+                        # Upload Loss plot every epoch (local file is preserved for manual upload)
                         if loss_fig_path:
                             try:
                                 upload_file(
@@ -647,7 +687,7 @@ class LTRTrainer(BaseTrainer):
                                     repo_type="model",
                                     token=token,
                                 )
-                                print(f"Uploaded Loss plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(loss_fig_path)}")
+                                print(f"⬆️ Uploaded Loss plot to Hugging Face: {self.repo_id}/{hf_prefix}/{os.path.basename(loss_fig_path)}")
                             except Exception as e:
                                 print("⚠️ Failed uploading Loss plot to Hugging Face:", e)
 
