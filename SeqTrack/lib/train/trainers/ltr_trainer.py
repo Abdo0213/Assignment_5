@@ -532,71 +532,72 @@ class LTRTrainer(BaseTrainer):
             # IoU and Loss plots - show complete training history
             iou_fig_path = None
             loss_fig_path = None
-            try:
-                # IoU Plot
-                if hasattr(self, 'iou_values') and len(self.iou_values) > 0:
-                    iou_fig_path = os.path.join(self.phase_dir, f"{self.phase_name}_iou.png")
-                    plt.figure(figsize=(10, 6))
-                    
-                    # Plot IoU values with proper epoch numbering
-                    epochs = range(1, len(self.iou_values) + 1)
-                    plt.plot(epochs, self.iou_values, marker='o', linewidth=2, markersize=4, color='blue')
-                    
-                    # Add current epoch marker
-                    if len(self.iou_values) > 0:
-                        plt.axvline(x=self.epoch, color='red', linestyle='--', alpha=0.7, 
-                                  label=f'Current Epoch: {self.epoch}')
-                    
-                    plt.xlabel("Epoch")
-                    plt.ylabel("IoU")
-                    plt.title(f"IoU Progress - {self.phase_name} (Total Epochs: {len(self.iou_values)})")
-                    plt.grid(True, alpha=0.3)
-                    plt.legend()
-                    plt.tight_layout()
-                    plt.savefig(iou_fig_path, dpi=150, bbox_inches='tight')
-                    plt.close()
-                    print(f"[{self.phase_name}] IoU plot saved at: {iou_fig_path} (showing {len(self.iou_values)} epochs)")
-                    print(f"[{self.phase_name}]    IoU values range: {min(self.iou_values):.4f} to {max(self.iou_values):.4f}")
-                    print(f"[{self.phase_name}]    Current epoch: {self.epoch}, Total epochs in history: {len(self.iou_values)}")
-                else:
-                    print("NO IOU")
-                    iou_fig_path = None
+            if self.repo_id and self.epoch % 5 == 0:
+                try:
+                    # IoU Plot
+                    if hasattr(self, 'iou_values') and len(self.iou_values) > 0:
+                        iou_fig_path = os.path.join(self.phase_dir, f"{self.phase_name}_iou.png")
+                        plt.figure(figsize=(10, 6))
+                        
+                        # Plot IoU values with proper epoch numbering
+                        epochs = range(1, len(self.iou_values) + 1)
+                        plt.plot(epochs, self.iou_values, marker='o', linewidth=2, markersize=4, color='blue')
+                        
+                        # Add current epoch marker
+                        if len(self.iou_values) > 0:
+                            plt.axvline(x=self.epoch, color='red', linestyle='--', alpha=0.7, 
+                                    label=f'Current Epoch: {self.epoch}')
+                        
+                        plt.xlabel("Epoch")
+                        plt.ylabel("IoU")
+                        plt.title(f"IoU Progress - {self.phase_name} (Total Epochs: {len(self.iou_values)})")
+                        plt.grid(True, alpha=0.3)
+                        plt.legend()
+                        plt.tight_layout()
+                        plt.savefig(iou_fig_path, dpi=150, bbox_inches='tight')
+                        plt.close()
+                        print(f"[{self.phase_name}] IoU plot saved at: {iou_fig_path} (showing {len(self.iou_values)} epochs)")
+                        print(f"[{self.phase_name}]    IoU values range: {min(self.iou_values):.4f} to {max(self.iou_values):.4f}")
+                        print(f"[{self.phase_name}]    Current epoch: {self.epoch}, Total epochs in history: {len(self.iou_values)}")
+                    else:
+                        print("NO IOU")
+                        iou_fig_path = None
 
                 # Loss Plot
-                if hasattr(self, 'loss_values') and len(self.loss_values) > 0:
-                    loss_fig_path = os.path.join(self.phase_dir, f"{self.phase_name}_loss.png")
-                    plt.figure(figsize=(10, 6))
-                    
-                    # Plot Loss values with proper epoch numbering
-                    epochs = range(1, len(self.loss_values) + 1)
-                    plt.plot(epochs, self.loss_values, marker='o', linewidth=2, markersize=4, color='red')
-                    
-                    # Add current epoch marker
-                    if len(self.loss_values) > 0:
-                        plt.axvline(x=self.epoch, color='red', linestyle='--', alpha=0.7, 
-                                  label=f'Current Epoch: {self.epoch}')
-                    
-                    plt.xlabel("Epoch")
-                    plt.ylabel("Loss")
-                    plt.title(f"Loss Progress - {self.phase_name} (Total Epochs: {len(self.loss_values)})")
-                    plt.grid(True, alpha=0.3)
-                    plt.legend()
-                    plt.tight_layout()
-                    plt.savefig(loss_fig_path, dpi=150, bbox_inches='tight')
-                    plt.close()
-                    print(f"[{self.phase_name}] Loss plot saved at: {loss_fig_path} (showing {len(self.loss_values)} epochs)")
-                    print(f"[{self.phase_name}]    Loss values range: {min(self.loss_values):.4f} to {max(self.loss_values):.4f}")
-                    print(f"[{self.phase_name}]    Current epoch: {self.epoch}, Total epochs in history: {len(self.loss_values)}")
-                else:
+                    if hasattr(self, 'loss_values') and len(self.loss_values) > 0:
+                        loss_fig_path = os.path.join(self.phase_dir, f"{self.phase_name}_loss.png")
+                        plt.figure(figsize=(10, 6))
+                        
+                        # Plot Loss values with proper epoch numbering
+                        epochs = range(1, len(self.loss_values) + 1)
+                        plt.plot(epochs, self.loss_values, marker='o', linewidth=2, markersize=4, color='red')
+                        
+                        # Add current epoch marker
+                        if len(self.loss_values) > 0:
+                            plt.axvline(x=self.epoch, color='red', linestyle='--', alpha=0.7, 
+                                    label=f'Current Epoch: {self.epoch}')
+                        
+                        plt.xlabel("Epoch")
+                        plt.ylabel("Loss")
+                        plt.title(f"Loss Progress - {self.phase_name} (Total Epochs: {len(self.loss_values)})")
+                        plt.grid(True, alpha=0.3)
+                        plt.legend()
+                        plt.tight_layout()
+                        plt.savefig(loss_fig_path, dpi=150, bbox_inches='tight')
+                        plt.close()
+                        print(f"[{self.phase_name}] Loss plot saved at: {loss_fig_path} (showing {len(self.loss_values)} epochs)")
+                        print(f"[{self.phase_name}]    Loss values range: {min(self.loss_values):.4f} to {max(self.loss_values):.4f}")
+                        print(f"[{self.phase_name}]    Current epoch: {self.epoch}, Total epochs in history: {len(self.loss_values)}")
+                    else:
+                        loss_fig_path = None
+                except Exception as e:
+                    print("⚠️ Failed to save plots:", e)
+                    iou_fig_path = None
                     loss_fig_path = None
-            except Exception as e:
-                print("⚠️ Failed to save plots:", e)
-                iou_fig_path = None
-                loss_fig_path = None
 
 
             # Optional Hugging Face upload
-            if self.repo_id:
+            if self.repo_id and self.epoch % 5 == 0:
                 try:
                     token = HfFolder.get_token()
                     if not token:
