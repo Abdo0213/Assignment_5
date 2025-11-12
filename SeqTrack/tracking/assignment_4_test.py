@@ -22,8 +22,10 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import re
 from pathlib import Path
 from collections import defaultdict
+import time
 
 # Add paths
 env_path = os.path.join(os.path.dirname(__file__), '..')
@@ -111,14 +113,14 @@ class Assignment4Evaluator:
             for f in phase_files:
                 # Expected format: phase_1/SEQTRACK_ep0005.pth.tar
                 filename = os.path.basename(f)
-                if "ep" in filename:
+                match = re.search(r'ep(\d+)', filename, re.IGNORECASE)
+                if match:
                     try:
-                        epoch_str = filename.split("ep")[1].split(".")[0]
-                        epoch = int(epoch_str)
-                        if self.start_epoch <= epoch <= self.end_epoch:
-                            checkpoints.append((epoch, f))
-                    except:
+                        epoch = int(match.group(1))
+                    except ValueError:
                         continue
+                    if self.start_epoch <= epoch <= self.end_epoch:
+                        checkpoints.append((epoch, f))
             
             checkpoints.sort(key=lambda x: x[0])
 
@@ -195,6 +197,18 @@ class Assignment4Evaluator:
                     display_name=f'{self.phase_name}_ep{epoch:04d}'
                 )
                 
+                # CRITICAL FIX: Clear results from previous epochs to avoid "FPS: -1" issue
+                # The framework skips inference if results already exist (cache mechanism)
+                # Since we're testing different checkpoints, we need fresh results for each epoch
+                tracker = trackers[0]
+                if os.path.exists(tracker.results_dir):
+                    print(f"🗑️ Clearing previous epoch results from: {tracker.results_dir}")
+                    try:
+                        shutil.rmtree(tracker.results_dir)
+                        print(f"✅ Results directory cleared successfully")
+                    except Exception as e:
+                        print(f"⚠️ Warning: Could not clear results directory: {e}")
+                
                 print(f"Using checkpoint: {checkpoint_path}")
             
                 # Run inference
@@ -225,6 +239,7 @@ class Assignment4Evaluator:
         try:
             total_time = 0
             total_frames = 0
+            time_files_found = 0
             
             for seq in dataset:
                 if seq.dataset in ['lasot', 'trackingnet', 'got10k', 'otb', 'uav', 'nfs', 'tnl2k']:
@@ -233,20 +248,34 @@ class Assignment4Evaluator:
                     time_file = os.path.join(tracker.results_dir, f"{seq.name}_time.txt")
                 
                 if os.path.exists(time_file):
-                    times = np.loadtxt(time_file)
-                    total_time += np.sum(times)
-                    total_frames += len(times)
+                    try:
+                        times = np.loadtxt(time_file)
+                        total_time += np.sum(times)
+                        total_frames += len(times)
+                        time_files_found += 1
+                    except Exception as e:
+                        print(f"⚠️ Warning: Could not load times from {time_file}: {e}")
+                        continue
+            
+            if time_files_found == 0:
+                print(f"⚠️ Warning: No time files found in {tracker.results_dir}")
+                print(f"   This might indicate inference did not run properly")
+                return {'fps': -1, 'ms_per_frame': -1, 'total_frames': 0}
             
             if total_frames > 0:
                 fps = total_frames / total_time if total_time > 0 else 0
                 ms_per_frame = (total_time / total_frames * 1000) if total_frames > 0 else 0
+                print(f"   Time files found: {time_files_found}, Total frames: {total_frames}, Total time: {total_time:.2f}s")
                 return {'fps': fps, 'ms_per_frame': ms_per_frame, 'total_frames': total_frames}
             else:
-                return {'fps': 0, 'ms_per_frame': 0, 'total_frames': 0}
+                print(f"⚠️ Warning: No frame timing data extracted (total_frames=0)")
+                return {'fps': -1, 'ms_per_frame': -1, 'total_frames': 0}
                 
         except Exception as e:
             print(f"⚠️ Error extracting FPS: {e}")
-            return {'fps': 0, 'ms_per_frame': 0, 'total_frames': 0}
+            import traceback
+            traceback.print_exc()
+            return {'fps': -1, 'ms_per_frame': -1, 'total_frames': 0}
     
     def evaluate_checkpoint(self, epoch, checkpoint_path):
         """Evaluate a checkpoint and extract metrics"""
@@ -274,6 +303,14 @@ class Assignment4Evaluator:
                     run_ids=None,
                     display_name=f'{self.phase_name}_ep{epoch:04d}'
                 )
+                
+                # CRITICAL FIX: Ensure we have fresh results for this epoch
+                # (should already be cleared by run_inference_for_checkpoint, but be safe)
+                tracker = trackers[0]
+                if not os.path.exists(tracker.results_dir):
+                    print(f"⚠️ Warning: Results directory not found for epoch {epoch}")
+                    print(f"   Expected path: {tracker.results_dir}")
+                    print(f"   Did inference run successfully?")
                 
                 dataset = get_dataset(self.dataset_name)
                 
@@ -355,6 +392,8 @@ class Assignment4Evaluator:
                     'auc': float(auc)
                 }
                 
+                # IMPORTANT: Store results in memory dictionary
+                # These are preserved when disk results are cleared in the next epoch
                 self.evaluation_results[epoch] = metrics
                 print(f"✅ Epoch {epoch} - IoU: {avg_iou:.4f}, Precision: {precision:.4f}, AUC: {auc:.4f}")
                 
@@ -375,27 +414,94 @@ class Assignment4Evaluator:
                 pass
             return None
     
-    def generate_tables(self):
-        """Generate tables for results"""
-        print("\n" + "="*60)
-        print("Generating Tables")
-        print("="*60)
+    def upload_results(self):
+        """Upload current results (tables, graphs, summary) to Hugging Face"""
+        print(f"\n{'='*60}")
+        print("Uploading Results")
+        print(f"{'='*60}")
         
+        try:
+            token = HfFolder.get_token()
+            if not token:
+                print("⚠️ Hugging Face token not found. Skipping upload.")
+                return
+            
+            # Generate and upload tables
+            table1_path, table2_path, table3_path = self._generate_tables_for_upload()
+            for p in [table1_path, table2_path, table3_path]:
+                try:
+                    upload_file(
+                        path_or_fileobj=p,
+                        path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
+                        repo_id=self.repo_id,
+                        repo_type="model",
+                        token=token,
+                    )
+                    print(f"⬆️ Uploaded table: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
+                except Exception as e:
+                    print(f"⚠️ Failed uploading {os.path.basename(p)}: {e}")
+            
+            # Generate and upload graphs
+            graph_path, combined_graph_path = self._generate_graphs_for_upload()
+            for p in [graph_path, combined_graph_path]:
+                try:
+                    upload_file(
+                        path_or_fileobj=p,
+                        path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
+                        repo_id=self.repo_id,
+                        repo_type="model",
+                        token=token,
+                    )
+                    print(f"⬆️ Uploaded graph: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
+                except Exception as e:
+                    print(f"⚠️ Failed uploading {os.path.basename(p)}: {e}")
+            
+            # Save and upload summary JSON
+            summary = {
+                'phase': self.phase_name,
+                'evaluation_results': self.evaluation_results,
+                'inference_rates': self.inference_rates,
+                'per_sequence_metrics': self.per_sequence_metrics
+            }
+            summary_path = os.path.join(self.results_dir, f"summary.json")
+            with open(summary_path, 'w') as f:
+                json.dump(summary, f, indent=2)
+            
+            try:
+                upload_file(
+                    path_or_fileobj=summary_path,
+                    path_in_repo=f"{self.upload_prefix}/{os.path.basename(summary_path)}",
+                    repo_id=self.repo_id,
+                    repo_type="model",
+                    token=token,
+                )
+                print(f"⬆️ Uploaded summary: {self.repo_id}/{self.upload_prefix}/summary.json")
+            except Exception as e:
+                print(f"⚠️ Failed uploading summary.json: {e}")
+        
+        except Exception as e:
+            print(f"⚠️ Error during upload: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _generate_tables_for_upload(self):
+        """Generate tables for upload (internal method)"""
         # Table 1: Inference Rate Results
         table1_data = []
         for epoch in sorted(self.inference_rates.keys()):
             rates = self.inference_rates[epoch]
+            fps_str = f"{rates['fps']:.2f}" if rates['fps'] >= 0 else "SKIPPED (cache hit)"
+            ms_frame_str = f"{rates['ms_per_frame']:.2f}" if rates['ms_per_frame'] >= 0 else "N/A"
             table1_data.append({
                 'Epoch': epoch,
-                'FPS': f"{rates['fps']:.2f}",
-                'ms/frame': f"{rates['ms_per_frame']:.2f}"
+                'FPS': fps_str,
+                'ms/frame': ms_frame_str
             })
         
         df_table1 = pd.DataFrame(table1_data)
         table1_path = os.path.join(self.results_dir, f"table1_inference_rate.csv")
         df_table1.to_csv(table1_path, index=False)
-        print(f"\n📊 Table 1 (Inference Rate) saved to: {table1_path}")
-        print(df_table1.to_string(index=False))
+        print(f"📊 Table 1 (Inference Rate) saved to: {table1_path}")
         
         # Table 2: Evaluation Results
         table2_data = []
@@ -411,8 +517,7 @@ class Assignment4Evaluator:
         df_table2 = pd.DataFrame(table2_data)
         table2_path = os.path.join(self.results_dir, f"table2_evaluation.csv")
         df_table2.to_csv(table2_path, index=False)
-        print(f"\n📊 Table 2 (Evaluation Results) saved to: {table2_path}")
-        print(df_table2.to_string(index=False))
+        print(f"📊 Table 2 (Evaluation Results) saved to: {table2_path}")
 
         # Table 3: Per-sequence metrics across epochs
         seq_rows = []
@@ -431,39 +536,28 @@ class Assignment4Evaluator:
             df_table3 = pd.DataFrame(columns=['Sequence', 'Epoch', 'IoU', 'Precision', 'AUC'])
         table3_path = os.path.join(self.results_dir, f"table3_per_sequence.csv")
         df_table3.to_csv(table3_path, index=False)
-        print(f"\n📊 Table 3 (Per-sequence Metrics) saved to: {table3_path}")
+        print(f"📊 Table 3 (Per-sequence Metrics) saved to: {table3_path}")
         
-        # Optional: upload tables to the same repo/phase path
-        try:
-            token = HfFolder.get_token()
-            if token:
-                for p in [table1_path, table2_path, table3_path]:
-                    try:
-                        upload_file(
-                            path_or_fileobj=p,
-                            path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
-                            repo_id=self.repo_id,
-                            repo_type="model",
-                            token=token,
-                        )
-                        print(f"⬆️ Uploaded table to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
-                    except Exception as e:
-                        print("⚠️ Failed uploading table:", e)
-        except Exception as e:
-            print("⚠️ Upload block (tables) error:", e)
+        return table1_path, table2_path, table3_path
 
-        return table1_path, table2_path
-    
-    def generate_graphs(self):
-        """Generate graphs for IoU, Precision, AUC vs Epoch"""
+    def generate_tables(self):
+        """Generate tables for results"""
         print("\n" + "="*60)
-        print("Generating Graphs")
+        print("Generating Tables")
         print("="*60)
         
+        self._generate_tables_for_upload()
+        
+        if any(r['fps'] < 0 for r in self.inference_rates.values()):
+            print("\n⚠️ NOTE: Some epochs show 'SKIPPED (cache hit)' - this indicates the FPS: -1 issue.")
+            print("   This has been fixed in the code. Re-run the script to get proper FPS values.")
+    
+    def _generate_graphs_for_upload(self):
+        """Generate graphs for upload (internal method)"""
         epochs = sorted(self.evaluation_results.keys())
         if not epochs:
             print("⚠️ No evaluation results to plot")
-            return
+            return None, None
         
         iou_values = [self.evaluation_results[e]['iou'] for e in epochs]
         precision_values = [self.evaluation_results[e]['precision'] for e in epochs]
@@ -519,30 +613,31 @@ class Assignment4Evaluator:
         plt.savefig(combined_graph_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"📈 Combined graph saved to: {combined_graph_path}")
-
-        # Optional: upload graphs to the same repo/phase path
-        try:
-            token = HfFolder.get_token()
-            if token:
-                for p in [graph_path, combined_graph_path]:
-                    try:
-                        upload_file(
-                            path_or_fileobj=p,
-                            path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
-                            repo_id=self.repo_id,
-                            repo_type="model",
-                            token=token,
-                        )
-                        print(f"⬆️ Uploaded graph to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
-                    except Exception as e:
-                        print("⚠️ Failed uploading graph:", e)
-        except Exception as e:
-            print("⚠️ Upload block (graphs) error:", e)
-
+        
         return graph_path, combined_graph_path
+
+    def generate_graphs(self):
+        """Generate graphs for IoU, Precision, AUC vs Epoch"""
+        print("\n" + "="*60)
+        print("Generating Graphs")
+        print("="*60)
+        
+        self._generate_graphs_for_upload()
     
     def run_full_evaluation(self):
-        """Run complete evaluation pipeline"""
+        """Run complete evaluation pipeline
+        
+        IMPORTANT: Data flow for each epoch:
+        1. Clear old results from PREVIOUS epoch (if exists)
+        2. Run inference → creates fresh results on disk
+        3. Extract metrics from fresh results → STORES IN MEMORY
+        4. Evaluate checkpoint → STORES IN MEMORY
+        5. Upload results after each checkpoint completes
+        6. Next epoch: clear these results, repeat
+        
+        After all epochs: CSV/JSON generated from MEMORY, not from disk results
+        So clearing results between epochs does NOT affect the final saved data!
+        """
         print(f"\n{'='*80}")
         print(f"Assignment 4: Test and Evaluation")
         print(f"{'='*80}\n")
@@ -554,19 +649,30 @@ class Assignment4Evaluator:
             return
         
         # Step 2: Download and run inference for each checkpoint
+        # NOTE: Results are cleared at START of each epoch (before inference), not after!
+        # This ensures each epoch gets fresh inference results
         for epoch, checkpoint_path_in_repo in checkpoints:
             # Download checkpoint
             checkpoint_path = self.download_checkpoint(checkpoint_path_in_repo, epoch)
             if checkpoint_path is None:
                 continue
             
-            # Run inference
+            # Run inference (clears OLD results, creates NEW ones)
             self.run_inference_for_checkpoint(checkpoint_path, epoch)
             
-            # Evaluate
+            # Evaluate (extracts metrics from NEW results, stores in memory)
             self.evaluate_checkpoint(epoch, checkpoint_path)
             
+            # Upload results after each checkpoint completes
+            self.upload_results()
+            
+            import time
+            if epoch % 5 == 0:
+                print("🕓 Sleeping 60 seconds to avoid HF rate limits...")
+                time.sleep(60)
             # Clean up checkpoint file (don't save locally for Kaggle)
+            # NOTE: We DON'T delete disk results here - they stay until next epoch
+            # when run_inference_for_checkpoint() clears them
             try:
                 if os.path.exists(checkpoint_path):
                     # Only delete if it's in temp dir (not cached by hf_hub)
@@ -575,38 +681,9 @@ class Assignment4Evaluator:
             except:
                 pass
         
-        # Step 3: Generate tables
+        # Step 3: Generate final tables and graphs (already uploaded after each checkpoint)
         self.generate_tables()
-        
-        # Step 4: Generate graphs
         self.generate_graphs()
-        
-        # Save summary JSON
-        summary = {
-            'phase': self.phase_name,
-            'evaluation_results': self.evaluation_results,
-            'inference_rates': self.inference_rates,
-            'per_sequence_metrics': self.per_sequence_metrics
-        }
-        summary_path = os.path.join(self.results_dir, f"summary.json")
-        with open(summary_path, 'w') as f:
-            json.dump(summary, f, indent=2)
-        print(f"\n💾 Summary saved to: {summary_path}")
-
-        # Optional: upload summary JSON
-        try:
-            token = HfFolder.get_token()
-            if token:
-                upload_file(
-                    path_or_fileobj=summary_path,
-                    path_in_repo=f"{self.upload_prefix}/{os.path.basename(summary_path)}",
-                    repo_id=self.repo_id,
-                    repo_type="model",
-                    token=token,
-                )
-                print(f"⬆️ Uploaded summary to Hugging Face: {self.repo_id}/{self.upload_prefix}/{os.path.basename(summary_path)}")
-        except Exception as e:
-            print("⚠️ Failed uploading summary JSON:", e)
         
         print(f"\n✅ Assignment 4 evaluation complete for {self.phase_name}!")
         print(f"📁 Results directory: {self.results_dir}")
@@ -649,4 +726,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
