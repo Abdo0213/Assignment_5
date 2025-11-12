@@ -32,7 +32,13 @@ env_path = os.path.join(os.path.dirname(__file__), '..')
 if env_path not in sys.path:
     sys.path.append(env_path)
 
-from huggingface_hub import hf_hub_download, HfFolder, list_repo_files, upload_file
+from huggingface_hub import (
+    hf_hub_download,
+    HfFolder,
+    list_repo_files,
+    HfApi,
+    CommitOperationAdd,
+)
 from lib.test.evaluation import get_dataset, trackerlist
 from lib.test.evaluation.running import run_dataset
 from lib.test.analysis.plot_results import print_results
@@ -399,34 +405,16 @@ class Assignment4Evaluator:
                 return
             
             # Generate and upload tables
+            files_to_upload = []
             table1_path, table2_path, table3_path = self._generate_tables_for_upload()
             for p in [table1_path, table2_path, table3_path]:
-                try:
-                    upload_file(
-                        path_or_fileobj=p,
-                        path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
-                        repo_id=self.repo_id,
-                        repo_type="model",
-                        token=token,
-                    )
-                    print(f"⬆️ Uploaded table: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
-                except Exception as e:
-                    print(f"⚠️ Failed uploading {os.path.basename(p)}: {e}")
+                files_to_upload.append((p, f"{self.upload_prefix}/{os.path.basename(p)}"))
             
             # Generate and upload graphs
             graph_path, combined_graph_path = self._generate_graphs_for_upload()
             for p in [graph_path, combined_graph_path]:
-                try:
-                    upload_file(
-                        path_or_fileobj=p,
-                        path_in_repo=f"{self.upload_prefix}/{os.path.basename(p)}",
-                        repo_id=self.repo_id,
-                        repo_type="model",
-                        token=token,
-                    )
-                    print(f"⬆️ Uploaded graph: {self.repo_id}/{self.upload_prefix}/{os.path.basename(p)}")
-                except Exception as e:
-                    print(f"⚠️ Failed uploading {os.path.basename(p)}: {e}")
+                if p:
+                    files_to_upload.append((p, f"{self.upload_prefix}/{os.path.basename(p)}"))
             
             # Save and upload summary JSON
             summary = {
@@ -439,17 +427,18 @@ class Assignment4Evaluator:
             with open(summary_path, 'w') as f:
                 json.dump(summary, f, indent=2)
             
-            try:
-                upload_file(
-                    path_or_fileobj=summary_path,
-                    path_in_repo=f"{self.upload_prefix}/{os.path.basename(summary_path)}",
-                    repo_id=self.repo_id,
-                    repo_type="model",
-                    token=token,
-                )
-                print(f"⬆️ Uploaded summary: {self.repo_id}/{self.upload_prefix}/summary.json")
-            except Exception as e:
-                print(f"⚠️ Failed uploading summary.json: {e}")
+            files_to_upload.append((summary_path, f"{self.upload_prefix}/{os.path.basename(summary_path)}"))
+            
+            latest_epoch = max(self.evaluation_results.keys()) if self.evaluation_results else None
+            commit_message = f"Update {self.phase_name} evaluation artifacts"
+            if latest_epoch is not None:
+                commit_message += f" (up to epoch {latest_epoch})"
+            
+            self._upload_files_with_single_commit(
+                files_to_upload,
+                token=token,
+                commit_message=commit_message,
+            )
         
         except Exception as e:
             print(f"⚠️ Error during upload: {e}")
@@ -510,6 +499,40 @@ class Assignment4Evaluator:
                 print(f"🔄 Loaded previous evaluation history from summary (epochs: {len(self.evaluation_results)}, sequences: {len(self.per_sequence_metrics)}).")
         except Exception as e:
             print(f"⚠️ Failed to load previous summary: {e}")
+    
+    def _upload_files_with_single_commit(self, files, token, commit_message):
+        """Upload multiple files to Hugging Face in a single commit with retries."""
+        if not files:
+            print("ℹ️ No files to upload.")
+            return
+        api = HfApi()
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                operations = [
+                    CommitOperationAdd(
+                        path_in_repo=repo_path,
+                        path_or_fileobj=local_path,
+                    )
+                    for local_path, repo_path in files
+                ]
+                api.create_commit(
+                    repo_id=self.repo_id,
+                    repo_type="model",
+                    operations=operations,
+                    commit_message=commit_message,
+                    token=token,
+                )
+                print(f"⬆️ Uploaded {len(files)} files to Hugging Face in a single commit.")
+                return
+            except Exception as e:
+                print(f"⚠️ Commit attempt {attempt} failed: {e}")
+                if attempt < max_retries:
+                    wait_time = min(60, attempt * 10)
+                    print(f"   Retrying in {wait_time} seconds to handle rate limits...")
+                    time.sleep(wait_time)
+                else:
+                    print("❌ All commit attempts failed. Please retry later.")
     
     def _generate_tables_for_upload(self):
         """Generate tables for upload (internal method)"""
