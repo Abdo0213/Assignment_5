@@ -63,39 +63,11 @@ class Assignment4Evaluator:
         self.per_sequence_metrics = {}  # sequence -> {epoch -> metrics}
 
         # Load previous summary if resuming
-        self.summary_path = os.path.join(self.results_dir, f"summary.json")
+        self.summary_path = os.path.join(self.results_dir, "summary.json")
+        if not os.path.exists(self.summary_path):
+            self._download_existing_summary()
         if os.path.exists(self.summary_path):
-            try:
-                with open(self.summary_path, 'r') as f:
-                    summary = json.load(f)
-                prev_eval = summary.get('evaluation_results', {})
-                prev_inf = summary.get('inference_rates', {})
-                prev_seq = summary.get('per_sequence_metrics', {})
-                # keys in summary may be strings, convert to int
-                for k, v in prev_eval.items():
-                    try:
-                        epoch = int(k)
-                    except Exception:
-                        continue
-                    self.evaluation_results[epoch] = v
-                for k, v in prev_inf.items():
-                    try:
-                        epoch = int(k)
-                    except Exception:
-                        continue
-                    self.inference_rates[epoch] = v
-                for seq_name, epoch_dict in prev_seq.items():
-                    seq_store = self.per_sequence_metrics.setdefault(seq_name, {})
-                    for k, v in epoch_dict.items():
-                        try:
-                            epoch = int(k)
-                        except Exception:
-                            continue
-                        seq_store[epoch] = v
-                if self.evaluation_results or self.per_sequence_metrics:
-                    print(f"🔄 Loaded previous evaluation history from summary (epochs: {len(self.evaluation_results)}, sequences: {len(self.per_sequence_metrics)}).")
-            except Exception as e:
-                print(f"⚠️ Failed to load previous summary: {e}")
+            self._load_summary_file()
         
     def list_checkpoints(self):
         """List available checkpoints in Hugging Face repo for this phase"""
@@ -483,6 +455,61 @@ class Assignment4Evaluator:
             print(f"⚠️ Error during upload: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _download_existing_summary(self):
+        """Try to fetch previous summary.json from Hugging Face so resume runs keep history."""
+        try:
+            token = HfFolder.get_token()
+            if not token:
+                return
+            remote_summary = f"{self.upload_prefix}/summary.json"
+            try:
+                downloaded_path = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=remote_summary,
+                    repo_type="model",
+                    token=token,
+                )
+            except Exception:
+                return
+            os.makedirs(self.results_dir, exist_ok=True)
+            shutil.copy(downloaded_path, self.summary_path)
+            print("⬇️ Downloaded previous summary.json from Hugging Face.")
+        except Exception as e:
+            print(f"⚠️ Could not download previous summary: {e}")
+    
+    def _load_summary_file(self):
+        """Load summary.json into memory dictionaries."""
+        try:
+            with open(self.summary_path, 'r') as f:
+                summary = json.load(f)
+            prev_eval = summary.get('evaluation_results', {})
+            prev_inf = summary.get('inference_rates', {})
+            prev_seq = summary.get('per_sequence_metrics', {})
+            for k, v in prev_eval.items():
+                try:
+                    epoch = int(k)
+                except Exception:
+                    continue
+                self.evaluation_results[epoch] = v
+            for k, v in prev_inf.items():
+                try:
+                    epoch = int(k)
+                except Exception:
+                    continue
+                self.inference_rates[epoch] = v
+            for seq_name, epoch_dict in prev_seq.items():
+                seq_store = self.per_sequence_metrics.setdefault(seq_name, {})
+                for k, v in epoch_dict.items():
+                    try:
+                        epoch = int(k)
+                    except Exception:
+                        continue
+                    seq_store[epoch] = v
+            if self.evaluation_results or self.per_sequence_metrics:
+                print(f"🔄 Loaded previous evaluation history from summary (epochs: {len(self.evaluation_results)}, sequences: {len(self.per_sequence_metrics)}).")
+        except Exception as e:
+            print(f"⚠️ Failed to load previous summary: {e}")
     
     def _generate_tables_for_upload(self):
         """Generate tables for upload (internal method)"""
